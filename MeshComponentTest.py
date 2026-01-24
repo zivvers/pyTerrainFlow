@@ -404,14 +404,14 @@ class MeshComponentTest(unittest.TestCase):
         
         self.assertIsInstance( curr_component, Edge )
 
-
+    #
+    # check to make sure we're not repeating any points!
+    #
     def test_direct_geodesics_2(self):
-
-        [conv_points] = self.promesheus2.create_lines( points )
 
         points = [ [(-1803732.875, 761463.25), (-1799191.375, 763189.0625), (-1793732.875, 765263.25)] ]
 
-        [conv_points] = self.promesheus.create_lines( points )
+        [conv_points] = self.promesheus2.create_lines( points )
 
         for i in range(1,len(conv_points)):
             prev_x, prev_y = conv_points[i-1].xy

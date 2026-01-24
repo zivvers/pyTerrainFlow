@@ -1,12 +1,10 @@
 import rasterio
 import numpy as np
-from osgeo import gdal
 from pyglm import glm
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import math
 from collections import Counter
-from osgeo import ogr
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Polygon
@@ -752,6 +750,11 @@ class MeshComponentCreator:
     
         return tri1, tri2
 
+
+    #
+    # for a given 2D _x_m, _y_m corresponding to floored pixel _pixel_x, _pixel_y
+    # are we on a Vertex, Edge, Triangle ?
+    # returns 
     def get_component(self, _x_m, _y_m, _pixel_x, _pixel_y):
 
         tri1, tri2 = self.get_candidate_tris( _pixel_x, _pixel_y )
@@ -783,24 +786,24 @@ class MeshComponentCreator:
             print("returning ")
             point = [tri1.point_s[0]]
             st = [tri.pixel_s[0]]
-            return Vertex(point, st), tri.point_s[0]
+            return Vertex(point, st), glm.vec3(tri.point_s[0])
 
         elif (tri.point_s[1][0], tri.point_s[1][1]) == (_x_m, _y_m): #t
             point = [tri.point_s[1]]
             st = [tri.pixel_s[1]]
-            return Vertex(point, st), tri.point_s[1]
+            return Vertex(point, st), glm.vec3(tri.point_s[1])
 
         elif (tri.point_s[2][0], tri.point_s[2][1]) == (_x_m, _y_m): #u
             point = [tri.point_s[2]]
             st = [tri.pixel_s[2]]
-            return Vertex(point, st), tri.point_s[2]
+            return Vertex(point, st), glm.vec3(tri.point_s[2])
 
 
         # on an edge? previous was using barycentric coords for this
         # but would miss some edges
        
         pnt = glm.vec2(_x_m, _y_m)
-        pnt_3D = (_x_m, _y_m, interp_z)
+        pnt_3D = glm.vec3(_x_m, _y_m, interp_z)
 
         if self.point_on( pnt, glm.vec2(tri.point_s[0]), glm.vec2(tri.point_s[1])):
             st = [tri.pixel_s[0], tri.pixel_s[1]]
@@ -898,7 +901,7 @@ class MeshComponentCreator:
                     print("FOUND PARALELL EDGE FOR VERT TO VERT")
                     best_component = Vertex([other_point], [other_pixel])
 
-                    return best_component, other_point
+                    return best_component, glm.vec3(other_point)
 
                 else:
                     continue
@@ -975,9 +978,9 @@ class MeshComponentCreator:
 
             if isinstance(curr_component, Triangle):
                 curr_face = curr_component
-                return curr_component, glm.vec3(point), curr_face
+                return curr_component, point, curr_face
             else:
-                return curr_component, glm.vec3(point), None
+                return curr_component, point, None
                 # curr_face = self.get_next_tri( curr_component, curr_point, _dir )
 
         elif isinstance(curr_component, Triangle):
@@ -2023,7 +2026,7 @@ if __name__ == "__main__":
 
  
         #SCRIPT
-        print("script")
+        '''
         points = [ [(-1922879.25, 854802.3125), (-1922326.0, 854249.125)] ]
 
         pointA = glm.vec2(points[0][0])
@@ -2056,7 +2059,7 @@ if __name__ == "__main__":
 
         fig_ = "geodesic_plt6.png"
         promesheus.plot_point_comp( fig_ , file_path, curr_component, intersection, curr_face )
-              
+        '''   
 
 
         #promesheus.animation_plot( flow_lines_comp_3D[21], "Accessibility/data/flow_line_animation_final.gif")
