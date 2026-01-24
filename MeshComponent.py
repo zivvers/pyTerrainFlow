@@ -5,13 +5,14 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import math
 from collections import Counter
+from osgeo import ogr
 
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Polygon
 
 #
 # should have separate utilities library!
-def cross_2D( a, b):
+def cross_2D( a, b ):
     return (a.x * b.y) - (a.y * b.x)
 
 
@@ -1995,11 +1996,15 @@ if __name__ == "__main__":
 
         promesheus.print_stats()
         
+        #
+        # if we don't want to use GDAL then comment out
+        # this line and 
         road_line_strings = promesheus.read_filter_gpkg(gpkg_file)
 
+        # uncomment this!
+        #road_line_strings = [[(-1922879.25, 854802.3125), (-1922326.0, 854249.125)]]
 
-        #plot(file_path, promesheus, [[buffer_array[10, 6, 0], buffer_array[10, 6, 1]]] )
-
+        
         promesheus.calculate_flows()
 
         promesheus.calc_upslope_new_point()
@@ -2015,7 +2020,7 @@ if __name__ == "__main__":
         # convert flow lines to 3D lines
         flow_lines_comp_3D = promesheus.create_lines( flow_lines )
 
-        obj_path = r"../Accessibility/data/ziv_collawash_flow_mesh_50_v9"
+        obj_path = r"data/test_collawash_flow_mesh_50_v9"
         scale = 0.008
 
     
