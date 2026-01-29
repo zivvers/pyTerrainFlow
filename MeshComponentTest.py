@@ -1,9 +1,10 @@
 import unittest
+from matplotlib import container
 import rasterio
 import numpy as np
 from pyglm import glm
-from MeshComponent import MeshComponentCreator
-from MeshComponent import Vertex, Edge, Triangle
+from MeshComponentCreator import MeshComponentCreator
+from MeshComponent import MeshComponentContainer, Vertex, Edge, Triangle
 import matplotlib.tri as mtri
 import matplotlib.pyplot as plt
 import sys as sys
@@ -115,30 +116,35 @@ class MeshComponentTest(unittest.TestCase):
 
         point1 = (-1803732.875, 761263.25)
         pixel_x, pixel_y = self.promesheus.convert_to_pixel(*point1)
-        _1 = self.promesheus.get_component( *point1 , pixel_x, pixel_y)
+        _1_container = self.promesheus.get_component( *point1 , pixel_x, pixel_y)
 
         point2 = (-1799191.375 + 10 , 761263.25)
         pixel_x, pixel_y = self.promesheus.convert_to_pixel(*point2)
-        _2 = self.promesheus.get_component(*point2, pixel_x, pixel_y)
+        _2_container = self.promesheus.get_component(*point2, pixel_x, pixel_y)
 
         point3 = (-1840065.125, 779429.375)
         pixel_x, pixel_y = self.promesheus.convert_to_pixel(*point3)
-        _3 = self.promesheus.get_component(*point3, pixel_x, pixel_y)
+        _3_container = self.promesheus.get_component(*point3, pixel_x, pixel_y)
 
-        assert(_1[0].pixel_s[0] == (9, 5))
+        _1 = _1_container.component
+        _2 = _2_container.component
+        _3 = _3_container.component
 
-        print(f"first type: {type(_1[0])} index: {_1[0].pixel_s[0]}")
-        print(f"second type: {type(_2[0])}")
-        print(f"third type: {type(_3[0])}")
+        assert(_1.pixel_s[0] == (9, 5))
+
+        print(f"first type: {type(_1)} index: {_1.pixel_s[0]}")
+        print(f"second type: {type(_2)}")
+        print(f"third type: {type(_3)}")
 
     def test_get_component_2(self):
 
         point1 = (-1803732.875, 761263.25)
         pixel_x, pixel_y = self.promesheus.convert_to_pixel(*point1)
-        _1 = self.promesheus.get_component( *point1 , pixel_x, pixel_y )
+        _1_container = self.promesheus.get_component( *point1 , pixel_x, pixel_y )
 
-        print(_1[0])
-        assert(isinstance(_1[0], Vertex))
+        _1 = _1_container.component
+
+        assert(isinstance(_1, Vertex))
 
 
     def test_get_next_triangle(self):
@@ -146,19 +152,14 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = pointA + glm.vec2(100,150)
 
-        curr_component, intersection, curr_face = self.promesheus.get_next_point(None, pointA, pointB )
-
-        assert(isinstance(curr_component, Vertex))
-        print(f"VERT PIXELS: {curr_component.pixel_s}")
-        print(f"VERT COORDS: {curr_component.point_s}")
+        _1_container = self.promesheus.get_next_point(MeshComponentContainer(), pointA, pointB )
+        _1 = _1_container.component
+        assert(isinstance(_1, Vertex))
 
         _dir = glm.normalize(pointB - pointA)
 
-        curr_face = self.promesheus.get_next_tri(curr_component, pointA, _dir )
+        curr_face = self.promesheus.get_next_tri(_1, pointA, _dir )
         stu =  curr_face.bary_x_y(*pointB)
-        print(f"NEW FACE COORDS: {curr_face.point_s}")
-        print(f"NEW FACE STU: {stu}")
-        
         
         #plot(self.file_path, self.promesheus, pointB)
         
@@ -176,15 +177,14 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = pointA + glm.vec2(10,0)
 
-        curr_component, intersection, curr_face  = self.promesheus.get_next_point(None, pointA, pointB )
+        container  = self.promesheus.get_next_point(MeshComponentContainer(), pointA, pointB )
 
-        assert(isinstance(curr_component, Vertex))
-        print(f"VERT PIXELS: {curr_component.pixel_s}")
-        print(f"VERT COORDS: {curr_component.point_s}")
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point(curr_component , glm.vec3(intersection).xy , pointB )
+        self.assertIsInstance(container.component, Vertex)
 
-        print(f"second take type: {type(curr_component)}")
-        assert(curr_component is None)
+        container = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
+
+        print(f"second take type: {type(container.component)}")
+        self.assertIsNone(container.component)
 
     #
     # at vertex move into next triangle and end at vertex there
@@ -194,22 +194,24 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = glm.vec2(-1799191.375, 765804.8125) # vertex at 10,4
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point(None, pointA, pointB )
+        container  = self.promesheus.get_next_point(MeshComponentContainer(), pointA, pointB )
 
-        assert(isinstance(curr_component, Vertex))
-        print(f"VERT PIXELS: {curr_component.pixel_s}")
-        print(f"VERT COORDS: {curr_component.point_s}")
+        #self.assertIsInstance(
+        
+        self.assertIsInstance(container.component, Vertex)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container = self.promesheus.get_next_point( container , container.point.xy , pointB )
 
-        assert( isinstance(curr_component, Edge) )
+        self.assertIsInstance(container.component, Edge)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
 
-        print(f"LAST INTERSECTION: {intersection}")
-        assert(curr_component is None)
+        container = self.promesheus.get_next_point( container , container.point.xy , pointB )
+        intersection = container.point
 
-        assert(intersection.x == pointB[0] and intersection.y == pointB[1]  )
+        self.assertIsNone(container.component)
+
+        self.assertEqual(intersection.x , pointB[0] )
+        self.assertEqual(intersection.y , pointB[1] )
 
     #
     # at vertex move along edge to point on that first edge
@@ -218,14 +220,14 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = glm.vec2(-1803732.875, 761263.25+2000)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        assert( isinstance(curr_component,  Vertex) )
+        self.assertIsInstance(container.component,  Vertex)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        intersection = container.point
+        container = self.promesheus.get_next_point( container , glm.vec3(intersection).xy , pointB )
 
-        print(f"LAST INTERSECTION: {intersection}")
-        assert(curr_component is None)
+        self.assertIsNone(container.component)
 
     #
     # at vertex move along edge to point on that first edge
@@ -234,14 +236,14 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = glm.vec2(-1803732.875, 761263.25+2000)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        assert( isinstance(curr_component,  Vertex) )
-
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        self.assertIsInstance(container.component,  Vertex)
+        intersection = container.point
+        container = self.promesheus.get_next_point( container , glm.vec3(intersection).xy , pointB )
 
         print(f"LAST INTERSECTION: {intersection}")
-        assert(curr_component is None)
+        self.assertIsNone( container.component )
 
     #
     # at edge move along edge to point on same edge
@@ -250,14 +252,15 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25+2000)
         pointB = glm.vec2(-1803732.875, 761263.25+4000)
 
-        curr_component, intersection, curr_face = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        assert( isinstance(curr_component, Edge) )
+        assert( isinstance(container.component, Edge) )
 
-        curr_component, intersection, curr_face = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        intersection = container.point
+        container = self.promesheus.get_next_point( container.component , glm.vec3(intersection).xy , pointB )
 
         print(f"LAST INTERSECTION: {intersection}")
-        assert(curr_component is None)
+        assert(container.component is None)
 
     #
     # start at vertex move slightly askew to edge
@@ -266,17 +269,17 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1817944.125, 774887.875)
         pointB = glm.vec2(-1817357.375, 779429.375)
 
-        curr_component, intersection, curr_face  = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        assert( isinstance(curr_component, Edge) )
+        self.assertIsInstance( container.component, Edge )
 
-        curr_component, intersection , curr_face  = self.promesheus.get_next_point(  curr_component , glm.vec3(intersection).xy , pointB )
+        container = self.promesheus.get_next_point(  container , glm.vec3(container.point).xy , pointB )
 
-        assert( isinstance(curr_component, Edge) )
+        self.assertIsInstance(container.component, Edge)
 
-        curr_component, intersection, curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
 
-        self.assertIsNone( curr_component )
+        self.assertIsNone( container.component )
 
 
     #
@@ -286,34 +289,34 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1803732.875, 761263.25+200)
         pointB = glm.vec2(-1803732.875+10000, 761263.25+4000)
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        self.assertIsInstance( curr_component, Edge )
+        self.assertIsInstance( container.component, Edge )
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container  = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
 
-        self.assertIsInstance( curr_component, Edge )
-        self.assertIsInstance( intersection , glm.vec3 )
+        self.assertIsInstance( container.component, Edge )
+        self.assertIsInstance( container.point , glm.vec3 )
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container  = self.promesheus.get_next_point( container , glm.vec3(container.point).xy, pointB )
 
-        self.assertIsInstance( curr_component, Edge )
-        self.assertIsInstance( intersection , glm.vec3 )
+        self.assertIsInstance( container.component, Edge )
+        self.assertIsInstance( container.point , glm.vec3 )
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container  = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
 
-        self.assertIsInstance( curr_component, Edge )
-        self.assertIsInstance( intersection , glm.vec3 )
+        self.assertIsInstance( container.component, Edge )
+        self.assertIsInstance( container.point , glm.vec3 )
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container  = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
 
-        self.assertIsInstance( curr_component, Edge )
-        self.assertIsInstance( intersection , glm.vec3 )
+        self.assertIsInstance( container.component, Edge )
+        self.assertIsInstance( container.point , glm.vec3 )
 
-        curr_component, intersection,curr_face  = self.promesheus.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
+        container = self.promesheus.get_next_point( container , glm.vec3(container.point).xy , pointB )
 
-        self.assertIsNone( curr_component )
-        self.assertIsNone( intersection )
+        self.assertIsNone( container.component )
+        self.assertIsNone( container.point )
 
     #
     # test point inside on raster border -> point outside raster
@@ -322,10 +325,10 @@ class MeshComponentTest(unittest.TestCase):
         pointA = glm.vec2(-1794649.75, 764914.8125)
         pointB = glm.vec2(-1803732.875+10000, 761263.25+4000)
         
-        curr_component, intersection, curr_face = self.promesheus.get_next_point( None, pointA , pointB )
+        container = self.promesheus.get_next_point( MeshComponentContainer(), pointA , pointB )
 
-        self.assertIsNone( curr_component )
-        self.assertIsNone( intersection )
+        self.assertIsNone( container.component )
+        self.assertIsNone( container.point )
 
     #
     # test point inside on raster border -> point outside raster
@@ -337,11 +340,13 @@ class MeshComponentTest(unittest.TestCase):
         pixels = [(11, 4), (11, 5)]
         points = [self.promesheus.get_point(*elem) for elem in pixels]
         edge = Edge(points, pixels)
-        
-        curr_component, intersection, curr_face = self.promesheus.get_next_point( edge, pointA , pointB )
 
-        self.assertIsNone( curr_component )
-        self.assertIsNone( intersection )
+        container = MeshComponentContainer(None, edge, pointA)
+        
+        container = self.promesheus.get_next_point( container, pointA , pointB )
+
+        self.assertIsNone( container.component )
+        self.assertIsNone( container.point )
 
     #
     # 2 point single line string
@@ -377,32 +382,34 @@ class MeshComponentTest(unittest.TestCase):
         pointB = glm.vec2(points[0][1])
 
         # 0
-        curr_component, intersection, curr_face = self.promesheus2.get_next_point(None, pointA, pointB )
+        container = self.promesheus2.get_next_point( MeshComponentContainer(), pointA, pointB )
 
-        self.assertIsInstance( curr_component, Vertex )
-        self.assertIsNone( curr_face )
+        self.assertIsInstance( container.component, Vertex )
+        self.assertIsNotNone( container.face )
 
         # 1
-        curr_component, intersection, curr_face = self.promesheus2.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
-        self.assertIsInstance( intersection, glm.vec3 )
-        self.assertIsInstance( curr_component, Vertex )
-        # 2
-        curr_component, intersection, curr_face =  self.promesheus2.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
-        self.assertIsInstance( intersection, glm.vec3 )
-        self.assertIsInstance( curr_component, Vertex )
-        # 3
-        curr_component, intersection, curr_face = self.promesheus2.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
-        self.assertIsInstance( intersection, glm.vec3 )
+        container = self.promesheus2.get_next_point( container, glm.vec3(container.point).xy , pointB )
+        self.assertIsInstance( container.point, glm.vec3 )
+        self.assertIsInstance( container.component, Vertex )
         
-        self.assertIsInstance( curr_component, Vertex )
+        # 2
+        container =  self.promesheus2.get_next_point( container , glm.vec3(container.point).xy , pointB )
+        self.assertIsInstance( container.point, glm.vec3 )
+        self.assertIsInstance( container.component, Vertex )
+        
+        # 3
+        container = self.promesheus2.get_next_point( container , glm.vec3(container.point).xy , pointB )
+        self.assertIsInstance( container.point, glm.vec3 )
+        
+        self.assertIsInstance( container.component, Vertex )
         
         # 4
         # If the line is directly on vertex to vertex then why do we have 
         # to visit some edges
-        curr_component, intersection, curr_face = self.promesheus2.get_next_point( curr_component , glm.vec3(intersection).xy , pointB )
-        self.assertIsInstance( intersection, glm.vec3 )        
+        container = self.promesheus2.get_next_point( container , glm.vec3(container.point).xy , pointB )
+        self.assertIsInstance( container.point, glm.vec3 )      
         
-        self.assertIsInstance( curr_component, Edge )
+        self.assertIsInstance( container.component, Edge )
 
     #
     # check to make sure we're not repeating any points!
