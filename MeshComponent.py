@@ -35,6 +35,12 @@ class MeshComponent:
         else:
             return True
 
+    #
+    # s0 we can get unique items (I think just triangles for now)
+    # unit set
+    def __hash__(self):
+        return hash(tuple(self.pixel_s))
+
     # method to over-ride
     def get_edges(self):
 
@@ -95,7 +101,7 @@ class Triangle(MeshComponent):
 
     def __init__(self, pts=None, sts=None):
         super().__init__(pts, sts)
-        if sts ==None:
+        if sts is None:
             print(f"MAKING TRIANGLE Invalid: {self.valid}")
         else:  
             print(f"MAKING TRIANGLE, num STS: {len(sts)}")

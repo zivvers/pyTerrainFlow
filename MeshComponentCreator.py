@@ -9,7 +9,9 @@ from collections import Counter
 from osgeo import ogr
 
 from matplotlib.animation import FuncAnimation
-from matplotlib.patches import Polygon
+import matplotlib.patches as mpatches
+
+from shapely.geometry import Polygon
 
 
 #
@@ -21,8 +23,12 @@ def cross_2D( a, b ):
 
 class MeshComponentCreator:
 
+    # static global things
     ENTRIES_PER_BUFFER = 21 #!
     ENTRIES_PER_INDEX = 3
+    DEFAULT_ROAD_WIDTH = 100 # meters
+    MAX_CLIP_SHAPES = 5 # max clip polygons per triangle
+    MAX_CLIP_POINTS = 500
 
     def __init__(self, buffer, tf, bnds):
 
@@ -32,9 +38,20 @@ class MeshComponentCreator:
         self.num_cols = self.buffer_array.shape[0]
         self.num_rows = self.buffer_array.shape[1]
 
+        self.num_triangles = (self.num_cols - 1)*(self.num_rows - 1)*2
+
+        #
+        # this holds the indices of start and end clip shapes
+        self.triangle_clip_indices = np.full((self.num_triangles, self.MAX_CLIP_SHAPES, 2), -1, dtype=np.int32)
+
+        self.clip_polygons = np.zeros((self.MAX_CLIP_POINTS, 2)).astype(dtype=np.float64)
+
+        self.polygon_clip_index = 0
+
+        # add triangle index
         self.create_index() # right now just for visualization
 
-    # returns vertices, x_center, y_cente
+    # returns vertices, x_center, y_center
     def get_points_centered_scaled(self, scale):
 
         points = []
@@ -535,7 +552,7 @@ class MeshComponentCreator:
 
     def pixel_within_bounds(self, pix):
 
-        if pix[0] < 0 or pix[0] >= self.num_cols or\
+        if pix[0] < 0 or pix[0] >= self.num_cols or \
             pix[1] < 0 or pix[1] >= self.num_rows:
             return False
         else:
@@ -820,7 +837,7 @@ class MeshComponentCreator:
             print(f"Curr face pixels: {curr_face.pixel_s}")
 
         print(f"Curr face type: {type(curr_face)}, Curr component type: {type(curr_container.component)}")
-        stu =  curr_face.bary_x_y(*curr_point)
+        stu = curr_face.bary_x_y(*curr_point)
         print(f"current face barycentric: {stu}")
 
         end_stu = curr_face.bary_x_y(*end_point)
@@ -1356,6 +1373,368 @@ class MeshComponentCreator:
 
 
     #
+    # for a list of linestrings just get the component containers
+    # for start, end, and all edge crossings
+    def decompose_edge_crossing(self, containers):
+
+        crossing_containers = []
+        
+        curr_tri = None
+
+        for i in range(len(containers)):
+
+            curr_container = containers[i]
+
+
+        # for i in range(len(single_line_string)-1):
+        #     pointA = glm.vec2(single_line_string[i])
+        #     pointB = glm.vec2(single_line_string[i+1])
+        #     section_segments = self.get_points_between(pointA, pointB)
+        #     if (curr_tri is None):
+        #         curr_tri = section_segments[0].face
+
+
+
+
+    def test_clip(self, line_strings):
+
+        for _it, ls in enumerate(line_strings):
+
+            line_string_center = []
+            line_string_right = []
+            line_string_left = []
+
+            for i in range(len(ls)-1):
+                pointA = glm.vec2(ls[i])
+                pointB = glm.vec2(ls[i+1])
+                
+                section_segments = self.get_points_between(pointA, pointB)
+                left_vec, right_vec = self.get_left_right_vectors(pointB - pointA)
+
+                l_pointA = pointA + (left_vec * self.DEFAULT_ROAD_WIDTH )
+                r_pointA = pointA + (right_vec * self.DEFAULT_ROAD_WIDTH )
+
+                l_pointB = pointB + (left_vec * self.DEFAULT_ROAD_WIDTH )
+                r_pointB = pointB + (right_vec * self.DEFAULT_ROAD_WIDTH )
+
+                l_section_segments = self.get_points_between(l_pointA, l_pointB)
+                section_segments = self.get_points_between(pointA, pointB)
+                r_section_segments = self.get_points_between(r_pointA, r_pointB)
+
+                l_section_2D = [(container.point.x, container.point.y) for container in l_section_segments]
+
+                r_section_2D = [(container.point.x, container.point.y) for container in r_section_segments]
+
+                all_points = r_section_2D + l_section_2D[::-1]
+
+                unique_tris = set([container.face for container in l_section_segments]
+                                + [container.face for container in r_section_segments])
+
+                curr_tri = next(iter(unique_tris))
+
+                tri_poly = Polygon( [pts[:2] for pts in curr_tri.point_s] )
+
+                clip_poly = Polygon(all_points)
+
+                result = tri_poly.difference(clip_poly)
+
+                return [pts[:2] for pts in curr_tri.point_s], all_points#result# just once
+
+    # rn returns center, left, right points
+    def create_road_poly(self, line_strings):
+
+        center_points = []
+        left_hand_points = []
+        right_hand_points = []
+
+        for _it, ls in enumerate(line_strings):
+
+            line_string_center = []
+            line_string_right = []
+            line_string_left = []
+
+            for i in range(len(ls)-1):
+                pointA = glm.vec2(ls[i])
+                pointB = glm.vec2(ls[i+1])
+
+                left_vec, right_vec = self.get_left_right_vectors(pointB - pointA)
+
+                l_pointA = pointA + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+                r_pointA = pointA + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+                l_pointB = pointB + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+                r_pointB = pointB + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+                l_section_segments = self.get_points_between(l_pointA, l_pointB)
+                section_segments = self.get_points_between(pointA, pointB)
+                r_section_segments = self.get_points_between(r_pointA, r_pointB)
+
+                #
+                # we want all points if it's first in linestring
+                # if not the last point of previous segment is first of this segment (cut out)
+                #
+                if (i == 0 ):
+                    pass 
+                else:
+                    l_section_segments = l_section_segments[1:]
+                    section_segments = section_segments[1:]
+                    r_section_segments = r_section_segments[1:]
+
+
+                line_string_center += section_segments
+                line_string_right += r_section_segments
+                line_string_left += l_section_segments
+                # ZIV
+
+            center_points.append(line_string_center)
+            left_hand_points.append(line_string_right)
+            right_hand_points.append(line_string_left)
+
+        return center_points , left_hand_points , right_hand_points
+
+        # for _it, ls in enumerate(line_strings):
+
+        #     section_points = []
+        #     left_hand_points = []
+        #     right_hand_points = []
+        #     for i in range(len(ls)-1):
+
+        #         reverse = False
+
+        #         print(ls[i])
+        #         pointA = glm.vec2(ls[i])
+        #         pointB = glm.vec2(ls[i+1])
+        #         container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
+        
+     
+    #
+    # order is not guaranteed 
+    #   pointA glm.vec2
+    #   pointB glm.vec2
+    def get_points_between( self, pointA, pointB ):
+
+        container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
+
+        # this means we're starting outside raster
+        if container.is_none():
+
+            print("Checking reverse!")
+            reverse = True # not using this var rn
+
+            # SWAP
+            pointA, pointB = pointB, pointA
+
+            container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
+
+            print(f"reverse intersection: {container.point}")
+
+            if container.component is None:
+                print("Reverse was NULL TOO")
+                return []
+        
+        reached_end = False
+
+        self.calculate_norm(container)
+        section_points = [ container ]
+
+        while(not reached_end):
+            container = self.get_next_point( container , glm.vec3(container.point).xy , pointB )
+
+            # intersection will be None only if we're at 
+            # a border and are going in direction outside it
+            if (container.point is not None):
+
+                self.calculate_norm(container)
+                section_points.append(container)
+
+            if (container.component is None):
+                reached_end = True
+
+        return section_points
+
+    #
+    # for a triangle get the index in the triangle index
+    #
+    def get_tri_index(self, tri):
+        
+        cols, rows = zip(*tri.pixel_s)
+
+        min_pixel = ( min(cols), min(rows) )
+
+        #print(f"MIN PIXEL: {min_pixel}")
+
+        #
+        # currIndx = c + r * self.num_cols;
+        #
+        cell = ( min_pixel[0] + min_pixel[1] * (self.num_cols-1) ) * 2;
+
+        num_verts_same_row_min = len([row for row in rows if row == min_pixel[1]])
+
+        # is it the higher or lower triangle in the cell
+        if num_verts_same_row_min == 1:
+            cell += 1
+        else:
+            assert(num_verts_same_row_min == 2)
+
+        return cell;
+
+
+    def get_open_tri_clip_index(self, tri_index):
+        open_index = -1
+        for i in range( self.MAX_CLIP_SHAPES ):
+
+            if self.triangle_clip_indices[tri_index, i, 0] == -1:
+                open_index = i
+                break;
+
+        if open_index == -1:
+            raise ValueError(f"trying to add too many clip polygons for tri index {i}")
+        else:
+            return open_index
+
+
+
+
+
+    #
+    # fill our triangle_clip_indices and clip_polygons for a given 2D ls
+    #
+    def fill_clip_array(self, ls):
+        
+        for i in range(len(ls)-1):
+            tri_points = []
+            pointA = glm.vec2(ls[i])
+            pointB = glm.vec2(ls[i+1])
+
+            # get original triangle
+            container = self.get_next_point( MeshComponentContainer(), pointA, pointB )
+
+            orig_tri = container.face
+
+            #next_tri = False
+
+            if container.is_none():
+                continue; # to next
+            else:
+                tri_points.append(pointA)
+
+            # should be our "exit" from original triangle
+            next_container = self.get_next_point( container , glm.vec3(container.point).xy , pointB )
+                
+            tri_points.append( next_container.point.xy )
+
+            assert(len(tri_points) > 1)
+           
+            tri_point_1 = tri_points[0]
+            tri_point_2 = tri_points[-1]
+
+            print(f"tri_point_1: {tri_point_1}, tri_point_2: {tri_point_2}")
+            left_vec, right_vec = self.get_left_right_vectors(tri_point_2 - tri_point_1)
+
+            l_pointA = tri_point_1 + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+            r_pointA = tri_point_1 + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+            l_pointB = tri_point_2 + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+            r_pointB = tri_point_2 + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+            print(f"left size A: {l_pointA} B: {l_pointB}")
+            print(f"right size A: {r_pointB} B: {r_pointB}")
+
+            # could be multiple triangles between!
+            l_section_segments = self.get_points_between(l_pointA, l_pointB)
+            r_section_segments = self.get_points_between(r_pointA, r_pointB)
+
+            # should be counter-clockwise
+            poly_points = [ c.point.xy for c in r_section_segments ] + [ c.point.xy for c in l_section_segments ][::-1] + [r_section_segments[0].point.xy]
+
+            poly_tris = [c.face for c in l_section_segments] + [c.face for c in r_section_segments] +  [orig_tri]
+
+            poly_tris = list( set( poly_tris ) )
+
+
+            poly_points_np = np.array(poly_points)
+
+            #
+            # add polygon once! will be referenced (potentially) multiple times
+            self.clip_polygons[self.polygon_clip_index:self.polygon_clip_index+len(poly_points)] = poly_points_np 
+
+            # reference polygon multiple times
+            for pt in poly_tris:
+
+                tri_index = self.get_tri_index(pt)
+
+                open_index = self.get_open_tri_clip_index(tri_index)
+
+                self.triangle_clip_indices[tri_index, open_index, :] = np.array([self.polygon_clip_index, self.polygon_clip_index+len(poly_points)])
+
+            # adjust index
+            self.polygon_clip_index+= len(poly_points)
+
+
+            return poly_points, poly_tris
+
+        #self.triangle_clip_indices = np.full((self.num_triangles, self.MAX_CLIP_SHAPES, 2), -1, dtype=np.int32)
+        #self.clip_polygons = np.zeros((self.MAX_CLIP_POINTS, 2)).astype(dtype=np.float64)
+
+
+
+    def create_polys(self, line_string):
+
+        ls = line_string;
+        for i in range(len(ls)-1):
+            tri_points = []
+            pointA = glm.vec2(ls[i])
+            pointB = glm.vec2(ls[i+1])
+
+            # get original triangle
+            container = self.get_next_point( MeshComponentContainer(), pointA, pointB )
+
+            orig_tri = container.face
+
+            #next_tri = False
+
+            if container.is_none():
+                continue; # to next
+            else:
+                tri_points.append(pointA)
+
+            # should be our "exit" from original triangle
+            next_container = self.get_next_point( container , glm.vec3(container.point).xy , pointB )
+                
+            tri_points.append( next_container.point.xy )
+
+            assert(len(tri_points) > 1)
+           
+            tri_point_1 = tri_points[0]
+            tri_point_2 = tri_points[-1]
+
+            print(f"tri_point_1: {tri_point_1}, tri_point_2: {tri_point_2}")
+            left_vec, right_vec = self.get_left_right_vectors(tri_point_2 - tri_point_1)
+
+            l_pointA = tri_point_1 + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+            r_pointA = tri_point_1 + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+            l_pointB = tri_point_2 + (left_vec * self.DEFAULT_ROAD_WIDTH / 2)
+            r_pointB = tri_point_2 + (right_vec * self.DEFAULT_ROAD_WIDTH / 2)
+
+            print(f"left size A: {l_pointA} B: {l_pointB}")
+            print(f"right size A: {r_pointB} B: {r_pointB}")
+
+            # could be multiple triangles between!
+            l_section_segments = self.get_points_between(l_pointA, l_pointB)
+            r_section_segments = self.get_points_between(r_pointA, r_pointB)
+
+            # should be counter-clockwise
+            poly_points = [ c.point.xy for c in r_section_segments ] + [ c.point.xy for c in l_section_segments ][::-1] + [r_section_segments[0].point.xy]
+
+            poly_tris = [c.face for c in l_section_segments] + [c.face for c in r_section_segments] +  [orig_tri]
+
+            poly_tris = list( set( poly_tris ) )
+
+            return poly_points, poly_tris
+    
+
+    #
     # with multiple line strings of 2D points create lines
     #
     def create_lines(self, line_strings):
@@ -1375,7 +1754,7 @@ class MeshComponentCreator:
                 container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
 
                 # this means we're starting outside raster
-                if container.component is None:
+                if container.is_none():
 
                     print("Checking reverse!")
                     reverse = True
@@ -1386,7 +1765,7 @@ class MeshComponentCreator:
 
                     print(f"reverse intersection: {container.point}")
 
-                    if container.component is None:
+                    if container.is_none():
                         print("Reverse was NULL TOO")
                         continue # next iter
                        
@@ -1427,9 +1806,9 @@ class MeshComponentCreator:
         return all_points
 
 
-    def write_line_obj(self, _lines, obj_file_name ,scale):
+    def write_line_obj( self, _lines, scale, obj_file_name ):
         with open(obj_file_name, "w") as f2:
-            f2.write("# OBJ flow lines\n")
+            f2.write("# OBJ line-strings\n")
 
             vertex_index = 1  # OBJ is 1-based
 
@@ -1441,11 +1820,11 @@ class MeshComponentCreator:
 
                 # write vertices
 
-                for pnt_dict in line:
-
-                    point = pnt_dict["point"]
-                    curr_face = pnt_dict["face"]
-                    curr_comp = pnt_dict["component"]
+                for container in line:
+                    print(container)
+                    point = container["point"]
+                    curr_face = container["face"]
+                    curr_comp = container["component"]
 
                     #{"point": intersection, "face": curr_face, "component": curr_component}
                     if curr_comp is not None:
@@ -1476,7 +1855,7 @@ class MeshComponentCreator:
                 f2.write(f"l {indices_str}\n\n")
 
 
-    def write_obj( self, path , flow_lines, road_lines, scale):
+    def write_obj_mesh( self, path , scale):
 
         vertices = self.get_points_centered_scaled( scale )
         faces = self.test_index_array
@@ -1493,12 +1872,20 @@ class MeshComponentCreator:
             for i, j, k in faces:
                 f.write(f"f {i+1} {j+1} {k+1}\n")
 
-        print("writing flow lines to OBJ")
-        self.write_line_obj(  flow_lines, path + "_flow_lines.obj", scale )
-        
-        print("writing road lines to OBJ")
-        self.write_line_obj(  road_lines, path + "_road_lines.obj", scale )
+        #print("writing flow lines to OBJ")
+        #self.write_line_obj(  flow_lines, path + "_flow_lines.obj", scale )
+        #
+        #print("writing road lines to OBJ")
+        #self.write_line_obj(  road_lines, path + "_road_lines.obj", scale )
     
+
+    def get_left_right_vectors(self, vec2):
+        left_rot_matrix = glm.mat2(0, 1, -1, 0)
+        right_rot_matrix = glm.mat2(0, -1, 1, 0)
+
+        return glm.normalize(left_rot_matrix * vec2), glm.normalize(right_rot_matrix * vec2)
+
+
  
     def plot_point_comp(self, fig_name, fpath, curr_component, intersection, curr_face ):
 
@@ -1520,8 +1907,6 @@ class MeshComponentCreator:
             #plt.tripcolor(triang, xs, ys, edgecolors='k', cmap='viridis')
             plt.triplot(triang, 'go-', label='Triangular Mesh',color='grey', linewidth=1)
 
-
-
             im = ax.imshow(band, extent=extent, cmap='viridis', origin='upper')
 
             if isinstance(curr_component , Triangle):
@@ -1533,7 +1918,7 @@ class MeshComponentCreator:
 
             else:
                 face_points_2D = [ glm.vec3(elem).xy for elem in curr_face.point_s ]
-                triangle = Polygon(face_points_2D , facecolor='orange', edgecolor='orange', linewidth=2)
+                triangle = mpatches.Polygon(face_points_2D , facecolor='orange', edgecolor='orange', linewidth=2)
                 ax.add_patch(triangle)
 
 
@@ -1598,7 +1983,7 @@ class MeshComponentCreator:
             #_init_face_points_2D = [ glm.vec3(elem).xy for elem in _init_face_points ]
 
             print(_init_face_points)
-            triangle = Polygon(_init_face_points, facecolor='orange', edgecolor='orange', linewidth=2)
+            triangle = mpatches.Polygon(_init_face_points, facecolor='orange', edgecolor='orange', linewidth=2)
             ax.add_patch(triangle)
             ln_comp, = ax.plot([], [], marker='o', markersize=8, color="red", linewidth=2.0)
             ln_road, = ax.plot([], [], 'black')
@@ -1643,6 +2028,80 @@ class MeshComponentCreator:
         #plt.show()
 
 
+    def plot_clip(self, fpath, tris):
+        fig, ax = plt.subplots(figsize=(16, 16))
+        with rasterio.open( fpath ) as src:
+
+            height = src.shape[0]
+            width = src.shape[1]
+            
+            band = src.read(1)
+
+            cols, rows = np.meshgrid(np.arange(width), np.arange(height))
+            xs, ys = rasterio.transform.xy(src.transform, rows, cols)
+
+            extent = [src.bounds.left, src.bounds.right, src.bounds.bottom, src.bounds.top]
+            x_min, x_max, y_min, y_max = extent            
+            im = ax.imshow(band, extent=extent, cmap='viridis', origin='upper')
+
+
+            #
+            #
+            for tri in tris:
+                coords = [p[:2] for p in tri.point_s]
+                tri_patch = mpatches.Polygon(coords, edgecolor='red', facecolor='red', alpha=0.5)
+                ax.add_patch(tri_patch)
+
+            poly_coords = self.clip_polygons[:self.polygon_clip_index]
+
+            polygon = mpatches.Polygon(poly_coords, edgecolor='blue', facecolor='none', linewidth=2)
+
+            ax.add_patch(polygon)
+
+            plt.show()
+
+
+
+    def plot_poly(self, fpath, poly1, poly2 ):
+
+        fig, ax = plt.subplots(figsize=(14, 14))
+        with rasterio.open( fpath ) as src:
+
+            height = src.shape[0]
+            width = src.shape[1]
+            
+            band = src.read(1)
+
+            cols, rows = np.meshgrid(np.arange(width), np.arange(height))
+            xs, ys = rasterio.transform.xy(src.transform, rows, cols)
+
+            extent = [src.bounds.left, src.bounds.right, src.bounds.bottom, src.bounds.top]
+            x_min, x_max, y_min, y_max = extent            
+            im = ax.imshow(band, extent=extent, cmap='viridis', origin='upper')
+            triang = mtri.Triangulation(xs, ys, self.test_index_array)
+            #plt.tripcolor(triang, xs, ys, edgecolors='k', cmap='viridis')
+            plt.triplot(triang, 'go-', label='Triangular Mesh',color='grey', linewidth=1)
+
+            im = ax.imshow(band, extent=extent, cmap='viridis', origin='upper')
+
+
+            polygon_patch1 = mpatches.Polygon(np.stack(poly1.exterior.coords.xy, axis=1),
+                                             closed=True,
+                                             facecolor='red',
+                                             alpha=0.5)
+
+            ax.add_patch(polygon_patch1)
+
+            polygon_patch2 = mpatches.Polygon(np.stack(poly2.exterior.coords.xy, axis=1),
+                                             closed=True,
+                                             facecolor='black',
+                                             alpha=0.5)
+
+            ax.add_patch(polygon_patch2)
+
+            plt.show()
+
+
 if __name__ == "__main__":
     
     #file_path = "Accessibility/data/sphere_11_new_v2_reproject_.tif"
@@ -1653,8 +2112,13 @@ if __name__ == "__main__":
     
     
     #file_path = r"data/clipped_collawash_v3.tif"
-    file_path = "data/sphere_11_new_reproj.tif"
-    gpkg_file = r"data/ziv_esri_roads_v8.gpkg"
+    #file_path = "data/sphere_11_new_reproj.tif"
+    #gpkg_file = r"data/ziv_esri_roads_v8.gpkg"
+
+    file_path = r"data/sine_raster.tif"
+
+    # gpkg_file = r"data/ESRI-oregon-primary-secondary-roads.gpkg"
+    gpkg_file = f"data/sine_line.gpkg"
 
     #
     # assumes a geotiff is in ESRI:102009!
@@ -1728,6 +2192,7 @@ if __name__ == "__main__":
         promesheus.print_stats()
         
 
+        '''
         pointA = glm.vec2(-1803732.875, 761263.25)
         pointB = glm.vec2(-1799191.375, 765804.8125)
 
@@ -1757,34 +2222,66 @@ if __name__ == "__main__":
         #promesheus.plot_point_comp( fig_ , file_path, container.component, container.point, container.face )
         points.append((container.point.x,container.point.y,container.point.z))
         '''
+        
 
         #
         # if we don't want to use GDAL then comment out
         # this line and 
+        
         road_line_strings = promesheus.read_filter_gpkg(gpkg_file)
 
+        '''
         # uncomment this!
-        #road_line_strings = [[(-1922879.25, 854802.3125), (-1922326.0, 854249.125)]]
+        # road_line_strings = [[(-1922879.25, 854802.3125), (-1922326.0, 854249.125)]]
 
-        
+        tri_pts, clip_pts = promesheus.test_clip(road_line_strings)
+
+        clp_poly = Polygon(clip_pts)
+        tri_poly = Polygon(tri_pts)
+
+        diff_poly = tri_poly.difference(clp_poly)
+        '''
+
+        #promesheus.plot_poly( file_path, clp_poly, diff_poly )
+
+        road_lines_comp_3D = promesheus.create_lines( road_line_strings )
+
+        poly_coords, tris = promesheus.fill_clip_array( road_line_strings[0] )
+
+        promesheus.plot_clip( file_path, tris)
+
+        '''
         promesheus.calculate_flows()
 
         promesheus.calc_upslope_new_point()
 
         flow_lines = promesheus.get_flowlines()
 
-
         # convert road lines to 3D lines
         road_lines_comp_3D = promesheus.create_lines( road_line_strings )
+
+        center_lines_3D, right_lines_3D, left_lines_3D = promesheus.create_road_poly( road_line_strings )
+
 
         # print(f"number road lines: {len(road_lines_3D)}")
 
         # convert flow lines to 3D lines
         flow_lines_comp_3D = promesheus.create_lines( flow_lines )
+        '''
 
-        obj_path = r"data/test_collawash_flow_mesh_50_v9"
-        scale = 0.008
+        #obj_path = r"data/test_collawash_flow_mesh_50_v10"
+        obj_path = r"data/test_sine_mesh"
+        scale = 0.0008
 
     
-        promesheus.write_obj( obj_path, flow_lines_comp_3D, road_lines_comp_3D , scale )
-        '''
+        promesheus.write_obj_mesh( obj_path, scale )
+        
+        promesheus.write_line_obj( road_lines_comp_3D , scale, obj_path + "_road.obj"  )
+
+        #promesheus.write_line_obj( center_lines_3D , scale, obj_path + "_road_center.obj"  )
+        #promesheus.write_line_obj( right_lines_3D , scale, obj_path + "_road_right.obj" )
+        #promesheus.write_line_obj( left_lines_3D , scale, obj_path + "_road_left.obj" )
+
+
+
+
