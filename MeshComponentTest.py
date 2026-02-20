@@ -427,6 +427,36 @@ class MeshComponentTest(unittest.TestCase):
             self.assertNotEqual( (prev_x, prev_y) , (curr_x, curr_y) )
 
 
+    def test_left_right_vectors(self):
+
+        vec = glm.vec2(0, 1)
+
+        l_vec, r_vec = self.promesheus2.get_left_right_vectors(vec)
+
+        self.assertEqual( l_vec, glm.vec2(-1,0) )
+        self.assertEqual( r_vec, glm.vec2(1,0) )
+
+
+    def test_get_index_tri(self):
+        self.promesheus.create_index()
+
+
+        for i , indices in enumerate( self.promesheus.test_index_array ):
+
+            indx1, indx2, indx3 = indices
+
+            col1,row1 = indx1 % self.promesheus.num_cols, indx1 // self.promesheus.num_cols
+            col2,row2 = indx2 % self.promesheus.num_cols, indx2 // self.promesheus.num_cols
+            col3,row3 = indx3 % self.promesheus.num_cols, indx3 // self.promesheus.num_cols
+
+            sts = [(col1,row1), (col2,row2), (col3,row3)]
+            t = Triangle([], sts)
+
+            tri_index = self.promesheus.get_tri_index(t)
+
+            self.assertEqual( i, tri_index )
+
+
 if __name__ == "__main__":
     sys.stdout = sys.__stdout__
     unittest.main(argv=["first-arg-is-ignored"], exit=False)
