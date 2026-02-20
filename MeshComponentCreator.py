@@ -1593,8 +1593,61 @@ class MeshComponentCreator:
             return open_index
 
 
+    #
+    # get unique tris that are to be clipped
+    #
+    def get_unique_clip_tris(self):
+
+        all_tris = []
+        for tri_indx in range(self.num_triangles):
+            open_index = self.get_open_tri_clip_index(tri_indx)
+
+            # no clip polygons
+            if open_index == 0:
+                continue 
+
+            else:
+                vert_sts = [(pt % self.num_cols, pt // self.num_cols ) for pt in self.test_index_array[tri_indx]]
+
+                vert_pts = [(self.buffer_array[vi[0], vi[1], 0].item(), self.buffer_array[vi[0], vi[1], 1].item(), \
+                             self.buffer_array[vi[0], vi[1], 2].item()) for vi in vert_sts]
+                
+                tri = Triangle(vert_pts , vert_sts)
+
+                all_tris.append( tri )
+        
+        return list( set(all_tris) ) 
 
 
+
+
+
+    #
+    # get unique polygons for clipping
+    #
+    def get_unique_clip_polys(self):
+
+        poly_list = []
+
+        for tri_indx in range(self.num_triangles):
+            open_index = self.get_open_tri_clip_index(tri_indx)
+
+            # no clip polygons
+            if open_index == 0:
+                continue 
+
+            else:
+                for clip_poly_indx in range(open_index):
+                    start_indx, end_indx = self.triangle_clip_indices[tri_indx, clip_poly_indx, :]
+
+                    poly_points = self.clip_polygons[start_indx : end_indx]
+
+                    curr_poly = Polygon(poly_points)
+
+                    poly_list.append(curr_poly)
+
+        # shapely polygons are hashable!
+        return list(set(poly_list))
 
     #
     # fill our triangle_clip_indices and clip_polygons for a given 2D ls
@@ -1663,6 +1716,7 @@ class MeshComponentCreator:
 
                 tri_index = self.get_tri_index(pt)
 
+                print(f"adding for tri index: {tri_index}")
                 open_index = self.get_open_tri_clip_index(tri_index)
 
                 self.triangle_clip_indices[tri_index, open_index, :] = np.array([self.polygon_clip_index, self.polygon_clip_index+len(poly_points)])
@@ -1671,8 +1725,7 @@ class MeshComponentCreator:
             self.polygon_clip_index+= len(poly_points)
 
 
-            return poly_points, poly_tris
-
+        return poly_tris
         #self.triangle_clip_indices = np.full((self.num_triangles, self.MAX_CLIP_SHAPES, 2), -1, dtype=np.int32)
         #self.clip_polygons = np.zeros((self.MAX_CLIP_POINTS, 2)).astype(dtype=np.float64)
 
@@ -2028,7 +2081,7 @@ class MeshComponentCreator:
         #plt.show()
 
 
-    def plot_clip(self, fpath, tris):
+    def plot_clip(self, fpath):
         fig, ax = plt.subplots(figsize=(16, 16))
         with rasterio.open( fpath ) as src:
 
@@ -2047,6 +2100,8 @@ class MeshComponentCreator:
 
             #
             #
+            tris = self.get_unique_clip_tris()
+
             for tri in tris:
                 coords = [p[:2] for p in tri.point_s]
                 tri_patch = mpatches.Polygon(coords, edgecolor='red', facecolor='red', alpha=0.5)
@@ -2054,9 +2109,14 @@ class MeshComponentCreator:
 
             poly_coords = self.clip_polygons[:self.polygon_clip_index]
 
-            polygon = mpatches.Polygon(poly_coords, edgecolor='blue', facecolor='none', linewidth=2)
+            clip_polys = self.get_unique_clip_polys() 
 
-            ax.add_patch(polygon)
+            for cp in clip_polys:
+
+                cp_coords =  list(cp.exterior.coords)
+
+                polygon = mpatches.Polygon(cp_coords, edgecolor='blue', facecolor='none', linewidth=2)
+                ax.add_patch(polygon)
 
             plt.show()
 
@@ -2246,9 +2306,11 @@ if __name__ == "__main__":
 
         road_lines_comp_3D = promesheus.create_lines( road_line_strings )
 
-        poly_coords, tris = promesheus.fill_clip_array( road_line_strings[0] )
-
-        promesheus.plot_clip( file_path, tris)
+        tris = promesheus.fill_clip_array( road_line_strings[0] )
+        
+        clip_polys = promesheus.get_unique_clip_polys()
+        
+        promesheus.plot_clip( file_path )
 
         '''
         promesheus.calculate_flows()
@@ -2273,10 +2335,11 @@ if __name__ == "__main__":
         obj_path = r"data/test_sine_mesh"
         scale = 0.0008
 
-    
+        '''
         promesheus.write_obj_mesh( obj_path, scale )
         
         promesheus.write_line_obj( road_lines_comp_3D , scale, obj_path + "_road.obj"  )
+        '''
 
         #promesheus.write_line_obj( center_lines_3D , scale, obj_path + "_road_center.obj"  )
         #promesheus.write_line_obj( right_lines_3D , scale, obj_path + "_road_right.obj" )
