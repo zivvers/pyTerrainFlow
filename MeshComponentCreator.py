@@ -115,8 +115,8 @@ class MeshComponentCreator:
 
     def convert_to_pixel(self, _x_m, _y_m):
 
-        pixel_y = ( _y_m - ( self.transform[5] + 0.5*self.transform[4] ) ) / self.transform[4];
-        pixel_x = ( _x_m - ( self.transform[2] + 0.5*self.transform[0] ) ) / self.transform[0];
+        pixel_y = ( _y_m - self.transform.f ) / self.transform.e;
+        pixel_x = ( _x_m - ( self.transform.c ) ) / self.transform.a;
         
         return (math.floor(pixel_x), math.floor(pixel_y))
 
@@ -1211,10 +1211,13 @@ class MeshComponentCreator:
 
         datasource = ogr.Open(gpkg_file_path, 0)
 
+        if datasource is None:
+            raise FileNotFoundError(f"Could not open: {gpkg_file_path}")
+
         layer = datasource.GetLayerByName("lines")
 
         if layer is None:
-            print(f"Layer not found!")
+            raise ValueError(f"Layer 'lines' not found!")
 
         linear_ring = ogr.Geometry(ogr.wkbLinearRing)
         layer.SetSpatialFilterRect(*self.bounds)
@@ -1951,7 +1954,7 @@ class MeshComponentCreator:
             band = src.read(1)
 
             cols, rows = np.meshgrid(np.arange(width), np.arange(height))
-            xs, ys = rasterio.transform.xy(src.transform, rows, cols)
+            xs, ys = rasterio.transform.xy(src.transform, rows, cols, offset='ul')
 
             extent = [src.bounds.left, src.bounds.right, src.bounds.bottom, src.bounds.top]
             x_min, x_max, y_min, y_max = extent            
@@ -2175,10 +2178,11 @@ if __name__ == "__main__":
     #file_path = "data/sphere_11_new_reproj.tif"
     #gpkg_file = r"data/ziv_esri_roads_v8.gpkg"
 
-    file_path = r"data/sine_raster.tif"
+    file_path = r"data/input_data/dem_EPSG_26910_542354_4944208.tif"
 
     # gpkg_file = r"data/ESRI-oregon-primary-secondary-roads.gpkg"
-    gpkg_file = f"data/sine_line.gpkg"
+    # gpkg_file = f"data/sine_line.gpkg"
+    gpkg_file = f"data/input_data/oregon-primary-secondary-roads_v3.gpkg"
 
     #
     # assumes a geotiff is in ESRI:102009!
@@ -2191,7 +2195,7 @@ if __name__ == "__main__":
             
         transf = src.transform
 
-        x_min, y_min = rasterio.transform.xy(transf, 0, 0)
+        x_min, y_min = rasterio.transform.xy(transf, 0, 0, offset='ul')
         _min = glm.vec3(x_min, y_min, 0)
 
         # set global
@@ -2206,7 +2210,7 @@ if __name__ == "__main__":
         for r in range(num_rows):
             for c in range(num_cols):
 
-                x_m, y_m = rasterio.transform.xy(transf, r, c)
+                x_m, y_m = rasterio.transform.xy(transf, r, c, offset='ul')
                 elev = band[r, c]
 
                 if elev < 0:
@@ -2306,11 +2310,11 @@ if __name__ == "__main__":
 
         road_lines_comp_3D = promesheus.create_lines( road_line_strings )
 
-        tris = promesheus.fill_clip_array( road_line_strings[0] )
+        #tris = promesheus.fill_clip_array( road_line_strings[0] )
         
-        clip_polys = promesheus.get_unique_clip_polys()
+        #clip_polys = promesheus.get_unique_clip_polys()
         
-        promesheus.plot_clip( file_path )
+        #promesheus.plot_clip( file_path )
 
         '''
         promesheus.calculate_flows()

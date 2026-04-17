@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 
-
+from osgeo import gdal
 from config import load_config
 
 
@@ -30,7 +30,7 @@ def raster_extent(transform, width, height):
     bottom = min(ys)
     top    = max(ys)
 
-    return { "left": left , "right":right, "bottom": bottom,  "top": top }
+    return { "left": left , "right" : right, "bottom" : bottom, "top": top }
 
 
 if __name__ == "__main__":
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     texture_path = cfg.input_dir / texture_file
 
     
-    dem_patch = 3
+    dem_patch = 4
     num_rows = num_cols = dem_patch
     tex_patch = (10 * (dem_patch - 1)) + 1
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
     num_tri = (num_cols - 1) * (num_rows-1) * 2
 
-    num_tex_tri =  (tex_patch - 1) * (tex_patch-1) * 2
+    num_tex_tri = (tex_patch - 1) * (tex_patch-1) * 2
 
     index_array = []
 
@@ -83,16 +83,14 @@ if __name__ == "__main__":
     tex_buffer_array = np.zeros((tex_patch, tex_patch, 3), dtype=np.float32)
     tex_index_array = []
 
-    fig, ax = plt.subplots( figsize=(14, 14) )
-    im = ax.imshow(band, extent=[x_min, x_max, y_min, y_max], cmap='viridis', origin='upper')
-    
 
     with rasterio.open(texture_path) as tex_src:
 
         tex_band = tex_src.read(1)
         tex_transf = tex_src.transform
         print(f"band shape: {tex_band.shape}")
-        tex_band = tex_band[:tex_patch, :tex_patch]
+
+        tex_band = tex_band[:tex_patch-1, :tex_patch-1]
 
         tex_h = tex_src.height
         tex_w = tex_src.width
@@ -149,6 +147,18 @@ if __name__ == "__main__":
                         index_array.append([prevRowBackColIndx, currIndx, prevRowSameColIndx])
                         index_array.append([prevRowBackColIndx, prevIndx, currIndx])
 
+        fig, ax = plt.subplots( figsize=(14, 14) )
+        im = ax.imshow(tex_band, extent=[x_min, x_max, y_min, y_max], cmap='viridis', origin='upper')
+    
+        # ds = gdal.Open( str(raster_path) )
+        # width = ds.RasterXSize
+        # height = ds.RasterYSize
+        # gt = ds.GetGeoTransform()
+
+        # minx = gt[0]
+        # maxy = gt[3]
+        # maxx = gt[0] + width * gt[1] + height * gt[2]
+        # miny = gt[3] + width * gt[4] + height * gt[5]
         
         dem_extent_d = raster_extent(src.transform, num_cols, num_rows)
         tex_extent_d = raster_extent(tex_src.transform, tex_patch, tex_patch)
@@ -158,7 +168,7 @@ if __name__ == "__main__":
         triang = mtri.Triangulation(xs, ys, index_array)
         tex_triang = mtri.Triangulation(tex_xs, tex_ys, tex_index_array)
 
-        plt.triplot(triang, 'go-', label='DEM Mesh',color='grey', linewidth=1)
+        plt.triplot(triang, 'go-', label='DEM Mesh',color='black', linewidth=1)
 
         plt.triplot(tex_triang, 'g-', label='Texture Mesh',color='pink', linewidth=0.25)
 
