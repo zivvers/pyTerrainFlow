@@ -5,6 +5,7 @@ from pyglm import glm
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import math
+import csv 
 from collections import Counter
 from osgeo import ogr
 
@@ -356,6 +357,19 @@ class MeshComponentCreator:
         
         # edge
         if isinstance(vertex_or_edge, Edge):
+
+            # are paralell?
+            pnt2 = vertex_or_edge.point_s[1]
+            pnt1 = vertex_or_edge.point_s[0]
+            e_pnt2 = glm.vec3(pnt2).xy
+            e_pnt1 = glm.vec3(pnt1).xy
+            seg = e_pnt2 - e_pnt1
+            den = cross_2D(_dir, seg)
+
+            if den == 0:
+                return None
+
+
             print("getting next Tri EDGE")
             pnt1 = vertex_or_edge.point_s[0]
             pnt2 = vertex_or_edge.point_s[1]
@@ -424,7 +438,6 @@ class MeshComponentCreator:
 
                 vert_b = (min_x, max_y)
                 vert_a = (max_x, min_y)
-                
             print(f"VERT A: {vert_a}, VERT B : {vert_b}")
 
 
@@ -521,8 +534,15 @@ class MeshComponentCreator:
 
                 e1_cross = cross_2D( _dir, e1)
                 e2_cross = cross_2D( e2, _dir)
+
+                #along_e1 = abs(cross_2D(d, e1)) <= self.ep and glm.dot(d, e1) > 0
+                #along_e2 = abs(cross_2D(d, e2)) <= EPS and glm.dot(d, e2) > 0
+                #    
+                #inside_wedge = c1 >= -EPS and c2 >= -EPS
+
                 print(f"E1 CROSS: {e1_cross}, E2 Cross: {e2_cross}")
-                if e1_cross >= 0 and e2_cross > 0:
+
+                if e1_cross >= 0 and e2_cross >= 0:
                     print(f"tri {i} passed")
                     chosen_tri = _tri
                     #return _tri
@@ -558,29 +578,59 @@ class MeshComponentCreator:
         else:
             return True
 
+    #
+    # Pixel must be within raster bounds, can be at the borders tho
+    #
     def get_candidate_tris(self, pixel_x, pixel_y):
     
-        tri1_v1_st = (pixel_x, pixel_y)
-        tri1_v2_st = (pixel_x+1, pixel_y)
-        tri1_v3_st = (pixel_x+1, pixel_y+1)
-    
-        tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
-        tri1_coords = [self.get_point(*st) for st in tri1_sts]
+        if pixel_x == self.num_cols - 1:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x, pixel_y+1)
+            tri1_v3_st = (pixel_x-1, pixel_y)
 
-        print(tri1_coords)
-        tri1 = Triangle(tri1_coords, tri1_sts)
-    
-        tri2_v1_st = (pixel_x, pixel_y)
-        tri2_v2_st = ((pixel_x+1), (pixel_y+1))
-        tri2_v3_st = (pixel_x, (pixel_y+1))
-    
-        tri2_sts = [tri2_v1_st, tri2_v2_st, tri2_v3_st]
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
 
-        tri2_coords = [self.get_point(*st) for st in tri2_sts]
-    
-        tri2 = Triangle(tri2_coords, tri2_sts)
-    
-        return tri1, tri2
+            print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+        # bottom
+        elif  pixel_y == self.num_rows - 1:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x+1, pixel_y)
+            tri1_v3_st = (pixel_x, pixel_y-1)
+
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+
+        else:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x+1, pixel_y)
+            tri1_v3_st = (pixel_x+1, pixel_y+1)
+        
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+        
+            tri2_v1_st = (pixel_x, pixel_y)
+            tri2_v2_st = ((pixel_x+1), (pixel_y+1))
+            tri2_v3_st = (pixel_x, (pixel_y+1))
+        
+            tri2_sts = [tri2_v1_st, tri2_v2_st, tri2_v3_st]
+
+            tri2_coords = [self.get_point(*st) for st in tri2_sts]
+        
+            tri2 = Triangle(tri2_coords, tri2_sts)
+        
+            return tri1, tri2
 
 
     #
@@ -592,18 +642,27 @@ class MeshComponentCreator:
 
         tri1, tri2 = self.get_candidate_tris( _pixel_x, _pixel_y )
 
-        tri1_stu = tri1.bary_x_y(_x_m, _y_m)
-        tri2_stu = tri2.bary_x_y(_x_m, _y_m)
+        # happens if on border
+        if tri2 == None:
 
-        print(f"TRI1 BARYCENTRIC (curr point): {tri1_stu[0]} {tri1_stu[1]} {tri1_stu[2]}")
-        print(f"TRI2 BARYCENTRIC: {tri2_stu[0]} {tri2_stu[1]} {tri2_stu[2]}")
+            tri = tri1
+            stu = tri.bary_x_y(_x_m, _y_m)
 
-        # round to nearest 10 decimal places for barycentric assertion
-        assert( all(round(e,10) >= 0 for e in tri1_stu) \
-                or all(round(e,10) >= 0  for e in tri2_stu) )
+        else:
 
-        stu = tri1_stu if all(e >= 0  for e in tri1_stu) else tri2_stu
-        tri = tri1 if all(e >= 0  for e in tri1_stu) else tri2
+            tri1_stu = tri1.bary_x_y(_x_m, _y_m)
+            tri2_stu = tri2.bary_x_y(_x_m, _y_m)
+
+            print(f"TRI1 BARYCENTRIC (curr point): {tri1_stu[0]} {tri1_stu[1]} {tri1_stu[2]}")
+            print(f"TRI2 BARYCENTRIC: {tri2_stu[0]} {tri2_stu[1]} {tri2_stu[2]}")
+
+            # round to nearest 10 decimal places for barycentric assertion
+            assert( all(round(e,10) >= 0 for e in tri1_stu) \
+                    or all(round(e,10) >= 0  for e in tri2_stu) )
+
+            stu = tri1_stu if all(e >= 0  for e in tri1_stu) else tri2_stu
+            tri = tri1 if all(e >= 0  for e in tri1_stu) else tri2
+        
         print(f"CHOSEN TRIANGLE S: {stu[0]} T: {stu[1]} U: {stu[2]}")
 
 
@@ -791,8 +850,12 @@ class MeshComponentCreator:
 
             _pixel_x, _pixel_y = self.convert_to_pixel(*curr_point)   
             
-            if _pixel_x < 0 or _pixel_x >= (self.num_cols - 1) \
-                or _pixel_y < 0 or _pixel_y >= (self.num_rows - 1):
+            #
+            # notice we allow points to fall on edges!
+            # how will we handle points outside
+            #
+            if _pixel_x < 0 or _pixel_x > (self.num_cols - 1) \
+                or _pixel_y < 0 or _pixel_y > (self.num_rows - 1):
                 # current point outside of raster bounds!
                 
                 return MeshComponentContainer() #None, None, None
@@ -807,6 +870,12 @@ class MeshComponentCreator:
                 # else:
                 #     # switch start and end points!
                 
+            #
+            # right border
+            if _pixel_x == (self.num_cols - 1) or _pixel_y == (self.num_rows - 1):
+
+                print("RIGHT OR BOOTTTOM BORDER")
+
 
             curr_container = self.get_component(*curr_point, _pixel_x, _pixel_y)
 
@@ -828,7 +897,14 @@ class MeshComponentCreator:
             assert( curr_container.component is not None )
             
             # replace edge or vert with current face
-            curr_face = self.get_next_tri( curr_container.component, curr_point, _dir )
+            tmp_face = self.get_next_tri( curr_container.component, curr_point, _dir )
+
+            # don't neccessarily need next triangle! 
+            # e.g. if land on edge and heading paralell
+            if tmp_face == None:
+                curr_face = curr_container.face
+            else:
+                curr_face = tmp_face
 
         if not curr_face.valid:
             print("invalid face!!")
@@ -1205,7 +1281,7 @@ class MeshComponentCreator:
     #
     # read in GPKG file
     # filter to TIF bounding box
-    # return array of array of point tuples
+    # return array of numpy array (np.float32)
     # 
     def read_filter_gpkg(self, gpkg_file_path):
 
@@ -1223,8 +1299,9 @@ class MeshComponentCreator:
         layer.SetSpatialFilterRect(*self.bounds)
 
         layer.ResetReading()
-        linestring_coords = []
-
+        linestring_coords = [] #np.empty( (0, 2), dtype=np.float32)
+        linestring_indx = np.empty( (0, 2), dtype=int )
+        index = 0
         for feature in layer:
             
             geom = feature.GetGeometryRef()
@@ -1234,13 +1311,24 @@ class MeshComponentCreator:
             # geom.GetGeometryType() == ogr.wkbLineString
             #
             if geom is not None and geom.GetGeometryName() == "LINESTRING":
-                coords = []
+
+                start = index
+                coords = np.array([], dtype=np.float32)
                 for p in range(geom.GetPointCount()):
                     # Get X and Y coordinates (Z is optional)
-                    coords.append((geom.GetX(p), geom.GetY(p)))
-                linestring_coords.append(coords)
+                    x, y = geom.GetX(p), geom.GetY(p)
+                    
+                    # only coords in Bounds!
+                    if (self.bounds[0] <= x <= self.bounds[2]) and (self.bounds[1] <= y <= self.bounds[3]):
+                        linestring_coords.append((x,y)) #= np.append( linestring_coords, np.array([(x,y)], dtype=np.float32) , axis=0)
+                        index+=1
+                
+                linestring_indx = np.append(linestring_indx, [(start , index-1)], axis=0)
 
-        return linestring_coords
+        linestring_coords = np.array(linestring_coords, dtype=np.float32)
+
+        return linestring_coords, linestring_indx
+    
     #
     # recursive function
     #
@@ -1789,24 +1877,28 @@ class MeshComponentCreator:
 
             return poly_points, poly_tris
     
+    def convert_tuple(self, vec3, i):
+        return (vec3.x, vec3.y, vec3.z, i)
 
     #
     # with multiple line strings of 2D points create lines
     #
-    def create_lines(self, line_strings):
+    def create_lines(self, points, ls_index):
 
         all_points = []
 
-        for _it, ls in enumerate(line_strings):
-                
+        for _it, ls in enumerate(ls_index):
+
+            start_indx, end_indx = ls
+            
             section_points = []
-            for i in range(len(ls)-1):
+            for i in range(start_indx, end_indx):
 
                 reverse = False
 
-                print(ls[i])
-                pointA = glm.vec2(ls[i])
-                pointB = glm.vec2(ls[i+1])
+                # print(ls[i])
+                pointA = glm.vec2(points[i])
+                pointB = glm.vec2(points[i+1])
                 container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
 
                 # this means we're starting outside raster
@@ -1814,8 +1906,8 @@ class MeshComponentCreator:
 
                     print("Checking reverse!")
                     reverse = True
-                    pointA = glm.vec2(ls[i+1])
-                    pointB = glm.vec2(ls[i])
+                    pointA = glm.vec2(points[i+1])
+                    pointB = glm.vec2(points[i])
 
                     container = self.get_next_point(MeshComponentContainer(), pointA, pointB )
 
@@ -1828,10 +1920,10 @@ class MeshComponentCreator:
 
                 reached_end = False
 
-                if (i == 0 ): # we should have intersection from previous segment
+                if ( i == start_indx ): # we should have intersection from previous segment
 
                     self.calculate_norm(container)
-                    section_points = [ {"point": container.point, "face": container.face, "component": container.component} ]
+                    section_points = [ {"point": self.convert_tuple(container.point, i), "face": container.face, "component": container.component} ]
 
                 while(not reached_end):
                     container = self.get_next_point( container , glm.vec3(container.point).xy , pointB )
@@ -1851,7 +1943,7 @@ class MeshComponentCreator:
                     if (container.point is not None):
 
                         self.calculate_norm(container)
-                        section_points.append({"point": container.point, "face": container.face, "component": container.component})
+                        section_points.append({"point": self.convert_tuple(container.point, i), "face": container.face, "component": container.component})
 
                     #reached_end = True 
 
@@ -2124,6 +2216,24 @@ class MeshComponentCreator:
             plt.show()
 
 
+    def read_cpp_roads():
+        file_path = "data/road_line_string.csv"
+        with open(file_path, mode='r', newline='') as f:
+            reader = csv.reader(f)
+
+            all_ls = []
+            curr_ls = []
+            for row in reader:
+                if not row:
+                    all_ls.append(curr_ls)
+                    curr_ls = []
+                    continue
+
+                else:
+                    curr_ls.append(tuple(float(val) for val in row))
+
+        return all_ls
+
 
     def plot_poly(self, fpath, poly1, poly2 ):
 
@@ -2179,6 +2289,7 @@ if __name__ == "__main__":
     #gpkg_file = r"data/ziv_esri_roads_v8.gpkg"
 
     file_path = r"data/input_data/dem_EPSG_26910_542354_4944208.tif"
+                                # dem_EPSG_26910_542354_4944208
 
     # gpkg_file = r"data/ESRI-oregon-primary-secondary-roads.gpkg"
     # gpkg_file = f"data/sine_line.gpkg"
@@ -2191,7 +2302,10 @@ if __name__ == "__main__":
     with rasterio.open(file_path) as src:
 
         band = src.read(1)
-        bounds = src.bounds
+        #
+        # these bounds are in fact wrong
+        # for our mesh b/c of offset='ul'
+        #bounds = src.bounds
             
         transf = src.transform
 
@@ -2248,6 +2362,9 @@ if __name__ == "__main__":
                 buffer_array[c, r, 20] = 0.0
 
 
+        bounds = [ buffer_array[0,0,0].item(), buffer_array[0, num_rows-1, 1].item(), 
+                    buffer_array[num_cols-1,0 , 0].item(), buffer_array[0, 0, 1].item() ]
+
         promesheus = MeshComponentCreator(buffer_array, transf, bounds)
 
         # we pretty much only need vertex normals for moving line off
@@ -2292,7 +2409,15 @@ if __name__ == "__main__":
         # if we don't want to use GDAL then comment out
         # this line and 
         
-        road_line_strings = promesheus.read_filter_gpkg(gpkg_file)
+        #
+        # numpy array of np.float32 and 
+        # numpy array of int
+        #
+
+        road_points, road_index = promesheus.read_filter_gpkg(gpkg_file)
+
+
+
 
         '''
         # uncomment this!
@@ -2308,7 +2433,21 @@ if __name__ == "__main__":
 
         #promesheus.plot_poly( file_path, clp_poly, diff_poly )
 
-        road_lines_comp_3D = promesheus.create_lines( road_line_strings )
+        # validation with Aaron
+        # road_line_strings = [[(542410.0, 4944193.0), ( 542430.0, 4944173.0  )]]
+        
+        #road_lines_comp_3D = promesheus.create_lines( road_line_strings )
+
+        #rp = np.array( [[542839.6875, 4943821.5], [542832.0625, 4943811.0]], dtype=np.float32 )
+        rp = np.array([[542781.25 , 4943800.5], [542758.0625, 4943793.0]], dtype=np.float32)
+        
+        rp = np.array([[543374.0, 4943487.0], [543374.0, 4943548.5]])
+        ri = np.array( [[0, 1]] , dtype=int )
+
+        rp = np.array([[543358.875, 4943464.5], [543382.0, 4943499.0]])
+        ri = np.array( [[0, 1]] , dtype=int )
+
+        road_lines_comp_3D = promesheus.create_lines( road_points, road_index )
 
         #tris = promesheus.fill_clip_array( road_line_strings[0] )
         
