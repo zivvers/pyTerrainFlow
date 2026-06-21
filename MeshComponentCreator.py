@@ -484,7 +484,7 @@ class MeshComponentCreator:
 
             # get all triangles given vertex position
             if topRight:
-                print("top rigght")
+                print("top right")
                 triangles = [self.make_tri_index(c,r,2)]
 
             elif topLeft:
@@ -492,7 +492,7 @@ class MeshComponentCreator:
                 triangles = [self.make_tri_index(c,r,0), self.make_tri_index(c,r,1)]
 
             elif bottomRight:
-                print("bottom rigght")
+                print("bottom right")
                 triangles = [self.make_tri_index(c,r,4), self.make_tri_index(c,r,3)]
 
             elif bottomLeft:
@@ -583,7 +583,18 @@ class MeshComponentCreator:
     #
     def get_candidate_tris(self, pixel_x, pixel_y):
     
-        if pixel_x == self.num_cols - 1:
+        if (pixel_x == self.num_cols - 1 and pixel_y == self.num_rows - 1):
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x-1, pixel_y-1)
+            tri1_v3_st = (pixel_x-1, pixel_y)
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            #print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+        elif pixel_x == self.num_cols - 1:
             tri1_v1_st = (pixel_x, pixel_y)
             tri1_v2_st = (pixel_x, pixel_y+1)
             tri1_v3_st = (pixel_x-1, pixel_y)
@@ -591,12 +602,12 @@ class MeshComponentCreator:
             tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
             tri1_coords = [self.get_point(*st) for st in tri1_sts]
 
-            print(tri1_coords)
+            #print(tri1_coords)
             tri1 = Triangle(tri1_coords, tri1_sts)
             return tri1, None
 
         # bottom
-        elif  pixel_y == self.num_rows - 1:
+        elif pixel_y == self.num_rows - 1:
             tri1_v1_st = (pixel_x, pixel_y)
             tri1_v2_st = (pixel_x+1, pixel_y)
             tri1_v3_st = (pixel_x, pixel_y-1)
@@ -604,7 +615,7 @@ class MeshComponentCreator:
             tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
             tri1_coords = [self.get_point(*st) for st in tri1_sts]
 
-            print(tri1_coords)
+            #print(tri1_coords)
             tri1 = Triangle(tri1_coords, tri1_sts)
             return tri1, None
 
@@ -749,7 +760,6 @@ class MeshComponentCreator:
         if isinstance(_curr_component , Vertex):
             face.check_vert_intersection( _curr_component, _dir)
         
-        
         edges = face.get_edges() # tuples
 
         min_t = math.inf 
@@ -848,6 +858,7 @@ class MeshComponentCreator:
 
         if curr_container.is_none():
 
+            print(f"CURRENT POINT: {curr_point.x, curr_point.y}")
             _pixel_x, _pixel_y = self.convert_to_pixel(*curr_point)   
             
             #
@@ -1186,7 +1197,7 @@ class MeshComponentCreator:
             neighbors.append(index4);
         
         #  top row
-        elif c == 0:
+        elif r == 0:
             neighbors.append(index3);
             neighbors.append(index5);
             neighbors.append(index6);
@@ -1338,14 +1349,15 @@ class MeshComponentCreator:
 
         adj_pnt = (self.buffer_array[c, r, 13].item() , self.buffer_array[c, r, 14].item()) #, self.buffer_array[c, r, 15])  
 
-
         if self.buffer_array[c, r, 16] == 1: # been visited
-            return [adj_pnt]
+            return [(c, r)]
         elif downslope_tup: # has downslope
             self.buffer_array[c, r, 16] = 1
-            return [adj_pnt] + self.create_flowline(downslope_tup[0], downslope_tup[1])
+            return [(c, r)] + self.create_flowline(downslope_tup[0], downslope_tup[1])
         else:
-            return [adj_pnt]
+            # still been visited!
+            self.buffer_array[c, r, 16] = 1
+            return [(c, r)]
 
 
     def get_flowlines(self):
@@ -1358,12 +1370,31 @@ class MeshComponentCreator:
         for row in range(self.num_rows):
             for col in range(self.num_cols):
 
-                # only get where there's no upslope and is downslope
-                if self.buffer_array[col, row, 12] == 1 and self.buffer_array[col, row, 7] == 1:
+
+                is_source = True;
+
+                # hmm very inefficient
+                neighbors = self.get_neighbors(col, row)
+                for n_c, n_r in neighbors:
+
+                    candidate_tup = self.get_downslope_point(n_c, n_r)
+
                     
-                    flow_line = self.create_flowline( col, row )
-                    if flow_line:
-                        all_lines.append(flow_line)
+                    # does it drain into c,r ?
+                    if candidate_tup and candidate_tup[0] == col and candidate_tup[1] == row:
+                        is_source = False;
+
+                print(f"row col :{col, row} is a has noting flowing into {is_source} ")
+                if is_source:
+
+                    # only get where there's no upslope and is downslope
+                    #if self.buffer_array[col, row, 12] == 1 and self.buffer_array[col, row, 7] == 1:
+                    if self.buffer_array[col, row, 7] == 1:   
+                        print(f"creating flowline starting At :{col, row} ")
+                        flow_line = self.create_flowline( col, row )
+                        if flow_line:
+                            all_lines.append(flow_line)
+
         return all_lines
     
     #
@@ -1708,9 +1739,6 @@ class MeshComponentCreator:
                 all_tris.append( tri )
         
         return list( set(all_tris) ) 
-
-
-
 
 
     #
@@ -2288,12 +2316,18 @@ if __name__ == "__main__":
     #file_path = "data/sphere_11_new_reproj.tif"
     #gpkg_file = r"data/ziv_esri_roads_v8.gpkg"
 
-    file_path = r"data/input_data/dem_EPSG_26910_542354_4944208.tif"
+    #file_path = r"data/input_data/dem_EPSG_26910_542354_4944208.tif"
                                 # dem_EPSG_26910_542354_4944208
+    
+    file_path = r"data/input_data/esri_3x3_00.tif"
+
+    #file_path = r"data/input_data/thing4.tif"
 
     # gpkg_file = r"data/ESRI-oregon-primary-secondary-roads.gpkg"
     # gpkg_file = f"data/sine_line.gpkg"
-    gpkg_file = f"data/input_data/oregon-primary-secondary-roads_v3.gpkg"
+    
+    #gpkg_file = f"data/input_data/oregon-primary-secondary-roads_v3.gpkg"
+    gpkg_file = f"data/input_data/bounds.gpkg"
 
     #
     # assumes a geotiff is in ESRI:102009!
@@ -2368,7 +2402,8 @@ if __name__ == "__main__":
         promesheus = MeshComponentCreator(buffer_array, transf, bounds)
 
         # we pretty much only need vertex normals for moving line off
-        promesheus.calculate_vertex_normals()
+        
+        #promesheus.calculate_vertex_normals()
 
         promesheus.print_stats()
         
@@ -2414,10 +2449,13 @@ if __name__ == "__main__":
         # numpy array of int
         #
 
+
+        '''
+
         road_points, road_index = promesheus.read_filter_gpkg(gpkg_file)
 
 
-
+        '''
 
         '''
         # uncomment this!
@@ -2447,6 +2485,8 @@ if __name__ == "__main__":
         rp = np.array([[543358.875, 4943464.5], [543382.0, 4943499.0]])
         ri = np.array( [[0, 1]] , dtype=int )
 
+
+        '''
         road_lines_comp_3D = promesheus.create_lines( road_points, road_index )
 
         #tris = promesheus.fill_clip_array( road_line_strings[0] )
@@ -2454,14 +2494,15 @@ if __name__ == "__main__":
         #clip_polys = promesheus.get_unique_clip_polys()
         
         #promesheus.plot_clip( file_path )
-
         '''
+        
         promesheus.calculate_flows()
 
         promesheus.calc_upslope_new_point()
 
         flow_lines = promesheus.get_flowlines()
 
+        '''
         # convert road lines to 3D lines
         road_lines_comp_3D = promesheus.create_lines( road_line_strings )
 
