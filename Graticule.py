@@ -8,6 +8,7 @@ class Graticule:
         self.id = _id
         self.p0_intersect_id = None
         self.p1_intersect_id = None
+        self.poly_id = None
 
     # oh rite change directly
     #
