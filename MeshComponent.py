@@ -114,6 +114,36 @@ class Triangle(MeshComponent):
     def print_obj(self):
         print(f"TRI {self.pixel_s[0]} ; {self.pixel_s[1]} ; {self.pixel_s[2]}")
 
+    # lol i guess tri doesn't know own index
+    # # in line with creation providing all points
+    #                     currIndx = c + r * dem_patch_num_verts;
+    #                     prevRowSameColIndx = c + (r - 1) * dem_patch_num_verts;
+    #                     prevRowBackColIndx = c - 1 + (r - 1) * dem_patch_num_verts;
+    #                     prevIndx = currIndx - 1;
+    #                     index_array.append([prevRowBackColIndx, currIndx, prevRowSameColIndx])
+    #                     index_array.append([prevRowBackColIndx, prevIndx, currIndx])
+
+    def ccw_verts_to_downward_edge(self, tri_indx, edge_indx) :
+        if edge_indx not in (0, 1, 2):
+            raise ValueError(f"edge_indx must be 0, 1, or 2; got {edge_indx}")      
+        
+        if tri_indx % 2 == 0:
+            match  edge_indx:
+                case 0:
+                    return (self.point_s[0], self.point_s[1])
+                case 1:
+                    return (self.point_s[0], self.point_s[2])
+                case 2:
+                    return (self.point_s[0], self.point_s[2])
+
+        else:
+            match edge_indx:
+                case 0:
+                    return (self.point_s[0], self.point_s[2])
+                case 1:
+                    return (self.point_s[0], self.point_s[1])
+                case 2:
+                    return (self.point_s[1], self.point_s[2])
 
     def bary_x_y(self, _x, _y):
 
