@@ -11,11 +11,15 @@ from pyglm import glm
 from collections import defaultdict
 from affine import Affine
 from MeshComponent import MeshComponent, Triangle
+from geoprep import create_roof_raster
 
 import math
 
 from MeshComponentCreator import MeshComponentCreator
 from Graticule import *
+
+
+
 
 
 
@@ -52,7 +56,7 @@ def raster_extent(transform, width, height, col_offset=0, row_offset=0):
 
 class MeshCut:
 
-    DEFAULT_ROAD_WIDTH = 10 # meters
+    DEFAULT_ROAD_WIDTH = 5 # meters
 
     MAX_INTERSECT_TRI_EDGE = 6
 
@@ -340,8 +344,8 @@ class MeshCut:
     # 
     #
     def order_cw(self, polygon_verts):
-        center_x = sum(x for x, y in polygon_verts) / len(polygon_verts)
-        center_y = sum(y for x, y in polygon_verts) / len(polygon_verts)
+        center_x = sum(x for x, _, _ in polygon_verts) / len(polygon_verts)
+        center_y = sum(y for _, y, _ in polygon_verts) / len(polygon_verts)
 
         return sorted( polygon_verts,
             key=lambda p: math.atan2(p[1] - center_y, p[0] - center_x) ,
@@ -767,11 +771,16 @@ class MeshCut:
     #
     # returns None for no intersection and 
     # {"point": <tuple>, "t": <float>}
-    # e0, e0 represent clip points (CCW!)
+    # e0, e0 represent clip points (CCW! 3D!)
     # p0, p1 represent mesh points
     def get_intersection(self, e0, e1, p0, p1):
         eps = 1e-9
 
+        e0_z = e0[2]
+        e1_z = e1[2]
+
+        e0 = glm.vec2(e0)
+        e1 = glm.vec2(e1)
         clip_dir = e1 - e0;
         mesh_dir = p1 - p0;
 
@@ -789,7 +798,12 @@ class MeshCut:
         t = self.cross_2D(_d, mesh_dir) / denominator
         u = self.cross_2D(_d, clip_dir) / denominator
 
-        clip_edge_hit = -eps <= t <= 1.0 + eps
+        #clip_edge_hit = -eps <= t <= 1.0 + eps
+
+        #
+        #
+        # notice no epsilon for lower bound!
+        clip_edge_hit = 0 < t <= 1.0 + eps
         mesh_segment_hit = -eps <= u <= 1.0 + eps
 
         if clip_edge_hit and mesh_segment_hit:
@@ -797,7 +811,11 @@ class MeshCut:
         else:
             return None
 
-        return { "intersection": intersection, "t": t }
+        e0_z + t * (e1_z - e0_z)
+
+        inter_3D = (intersection[0], intersection[1], e0_z)
+
+        return { "intersection": inter_3D , "t": t }
 
     #
     # method that returns a list of intersections defined as
@@ -812,8 +830,8 @@ class MeshCut:
 
         inters_list = []
 
-        _e0 = glm.vec2(clip_e0)
-        _e1 = glm.vec2(clip_e1)
+        _e0 = clip_e0
+        _e1 = clip_e1
 
         #min_x = np.min(clip_e0[0], clip_e1[0]).item()
         #max_x = np.max(clip_e0[0], clip_e1[0]).item()
@@ -1316,7 +1334,7 @@ class MeshCut:
                 
                 new_point = clip_poly_list[curr_poly_id[0]][curr_poly_id[1]]
 
-                poly_points.append( new_point )
+                poly_points.append( {"point": new_point,"type": "intersection"} )
 
                 print(f"POLY ID: {curr_poly_id}")
 
@@ -1433,7 +1451,7 @@ class MeshCut:
 
         print(f"end vert: { tuple(mesh.get_point(*end_CR)) }, intersection: {tuple(curr_intersection["intersection"])}")
 
-        _dir = end_vert - curr_intersection["intersection"]
+        _dir = end_vert -  glm.vec2( curr_intersection["intersection"] )
 
         _cross = self.cross_2D(poly_edge_dir, _dir)
 
@@ -1493,7 +1511,7 @@ class MeshCut:
             ccw_vert_cr = ccw_vertex_index % self.num_cols, ccw_vertex_index // self.num_cols
             ccw_vert = self.get_point(*ccw_vert_cr)[:2]
 
-            poly_points.append( ccw_vert )
+            poly_points.append({"point": ccw_vert, "type": "vert", "pix": ccw_vert_cr } )
 
             if tri_edge in all_tri_edges:
                 num_inters = len( all_tri_edges[ tri_edge ]["intersections"] )
@@ -1604,7 +1622,8 @@ class MeshCut:
 
             print(f"CURR INTERSECTION: {curr_intersection}")
 
-            poly_points.append(curr_intersection["intersection"])
+            poly_points.append({"point": curr_intersection["intersection"] \
+                                , "type": "intersection"})
 
             print(f"size poly points before hitting clip edge: {len(poly_points)}")
 
@@ -1612,7 +1631,8 @@ class MeshCut:
 
             print(f"POST CLIP INTERS: {curr_intersection}")
 
-            poly_points.append(curr_intersection["intersection"])
+            poly_points.append({"point": curr_intersection["intersection"]
+                                    , "type": "intersection"})
 
             print(f"size poly points before hitting clip edge: {len(poly_points)}")
 
@@ -2060,24 +2080,30 @@ class MeshCut:
         quad_4points = []
         for i in range(rl_index[0], rl_index[1]+1):
 
+            currZ = rl_points[i][2]
             currPoint = glm.vec2( rl_points[i] )
+    
             if (i == 0):#first
                 prevVec = None 
-                nextVec = rl_points[i+1] - currPoint
+                nextVec = glm.vec2( rl_points[i+1] ) - currPoint
 
-            elif (i == rl_index[1]):#last
-                prevVec = currPoint - rl_points[i-1]
+            elif (i == rl_index[1]): # last
+                prevVec = currPoint - glm.vec2( rl_points[i-1] )
                 nextVec = None
 
             else:
-                prevVec = currPoint - rl_points[i-1]
-                nextVec = rl_points[i+1] - currPoint
+                prevVec = currPoint - glm.vec2(rl_points[i-1])
+                nextVec = glm.vec2( rl_points[i+1] ) - currPoint
 
 
             left_vec, right_vec = self.get_left_right_vectors(prevVec, nextVec)
                         
             l_point = currPoint  + (left_vec * self.DEFAULT_ROAD_WIDTH )
             r_point = currPoint  + (right_vec * self.DEFAULT_ROAD_WIDTH )
+
+
+            l_point = (*l_point, currZ)
+            r_point = (*r_point, currZ)
 
             quad_4points.extend([l_point, r_point])
 
@@ -2105,6 +2131,207 @@ class MeshCut:
 
         return (glm.vec2(vert1), glm.vec2(vert2))
 
+
+    # returns vertices, x_center, y_center
+    def get_points_centered_scaled(self, scale):
+
+        points = []
+        cnt = 0
+
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
+     
+                p = self.buffer_array[c, r , 0:3]
+
+                # UNIFORM SCALING SO EVERYTHING HAS SAME NORMALS!
+
+                new_z = p[2] * scale # not centering Z
+
+                points.append( ( ( p[0]-self.x_center ) * scale, ( p[1]-self.y_center)* scale, new_z ) )
+        return points
+
+    def get_points(self):
+
+        x_max, y_max, z_max = -math.inf, -math.inf, -math.inf
+        x_min, y_min, z_min = math.inf, math.inf, math.inf
+
+        points = []
+
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
+
+                p = self.buffer_array[c, r , 0:3]
+                #XIV
+                points.append( ( p[0].item(), p[1].item(), p[2].item() ) )
+
+                x_max = max(x_max, p[0])
+                y_max = max(y_max, p[1])
+                z_max = max(z_max, p[2])
+                x_min = min(x_min, p[0])
+                y_min = min(y_min, p[1])
+                z_min = min(z_min, p[2])
+
+        x_center = (x_max + x_min) / 2
+        y_center = (y_max + y_min) / 2
+        z_center = (z_max + z_min) / 2
+
+        center = (x_center, y_center, z_center)
+
+        return points, center
+
+    #
+    #
+    #
+    def create_face_obj(self, scale, path, tri_clip_dict):
+
+        vertices, center = self.get_points( )
+
+        curr_vert_index = len(vertices)
+
+        faces = []
+        for i, tri in enumerate(self.index_array):
+
+            if i in tri_clip_dict: # it's clipped!
+                
+                polys = tri_clip_dict[i]
+
+                for poly in polys:
+                    poly_str = "f"
+
+                    for p in poly:
+
+                        if p["type"] == "vert":
+                            pix = p["pix"]
+                            indx = int( pix[0] + (pix[1] * self.num_cols) ) +1 # 1-based!
+                            poly_str+=" "+str(indx)
+                        else:
+                            poly_str+=" "+str(curr_vert_index+1)
+                            vertices.append(p["point"])
+                            curr_vert_index+=1
+
+                    faces.append( poly_str )
+                
+            else: # not clipped
+
+                faces.append( f"f {tri[0]+1} {tri[1]+1} {tri[2]+1}") # 1 based!
+
+        #
+        # center, scale
+        vertices = [(scale*(vert[0] - center[0]), scale*(vert[1] - center[1]), scale*vert[2]) for vert in vertices]
+
+        with open(path + ".obj", "w") as f:
+            f.write("# OBJ DEM mesh w/ clipped road\n")
+
+            for v in vertices:
+                f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+
+            f.write( "\n".join(faces) )
+
+
+    #
+    # Pixel must be within raster bounds, can be at the borders tho
+    #
+    def get_candidate_tris(self, pixel_x, pixel_y):
+    
+        if (pixel_x == self.num_cols - 1 and pixel_y == self.num_rows - 1):
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x-1, pixel_y-1)
+            tri1_v3_st = (pixel_x-1, pixel_y)
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            #print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+        elif pixel_x == self.num_cols - 1:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x, pixel_y+1)
+            tri1_v3_st = (pixel_x-1, pixel_y)
+
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            #print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+        # bottom
+        elif pixel_y == self.num_rows - 1:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x+1, pixel_y)
+            tri1_v3_st = (pixel_x, pixel_y-1)
+
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            #print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+            return tri1, None
+
+        else:
+            tri1_v1_st = (pixel_x, pixel_y)
+            tri1_v2_st = (pixel_x+1, pixel_y)
+            tri1_v3_st = (pixel_x+1, pixel_y+1)
+        
+            tri1_sts = [tri1_v1_st, tri1_v2_st, tri1_v3_st]
+            tri1_coords = [self.get_point(*st) for st in tri1_sts]
+
+            print(tri1_coords)
+            tri1 = Triangle(tri1_coords, tri1_sts)
+        
+            tri2_v1_st = (pixel_x, pixel_y)
+            tri2_v2_st = ((pixel_x+1), (pixel_y+1))
+            tri2_v3_st = (pixel_x, (pixel_y+1))
+        
+            tri2_sts = [tri2_v1_st, tri2_v2_st, tri2_v3_st]
+
+            tri2_coords = [self.get_point(*st) for st in tri2_sts]
+        
+            tri2 = Triangle(tri2_coords, tri2_sts)
+        
+            return tri1, tri2
+
+
+
+    #
+    #
+    #
+    def interp_elev(self, point):
+
+        print(f"Point: {point}")
+        _x_m, _y_m = point
+        pixel_y = ( _y_m - self.transform.f ) / self.transform.e;
+        pixel_x = ( _x_m - ( self.transform.c ) ) / self.transform.a;
+        
+        pixel_x, pixel_y = (math.floor(pixel_x), math.floor(pixel_y))
+
+        cand_tri1, cand_tri2 = self.get_candidate_tris( pixel_x, pixel_y )
+
+        # happens if on border
+        if cand_tri2 == None:
+
+            tri = cand_tri1
+            stu = tri.bary_x_y(_x_m, _y_m)
+
+        else:
+            tri1_stu = cand_tri1.bary_x_y(_x_m, _y_m)
+            tri2_stu = cand_tri2.bary_x_y(_x_m, _y_m)
+
+            print(f"TRI1 BARYCENTRIC (curr point): {tri1_stu[0]} {tri1_stu[1]} {tri1_stu[2]}")
+            print(f"TRI2 BARYCENTRIC: {tri2_stu[0]} {tri2_stu[1]} {tri2_stu[2]}")
+
+            # round to nearest 10 decimal places for barycentric assertion
+            assert( all(round(e,10) >= 0 for e in tri1_stu) \
+                    or all(round(e,10) >= 0  for e in tri2_stu) )
+
+            stu = tri1_stu if all(e >= 0  for e in tri1_stu) else tri2_stu
+            tri = cand_tri1 if all(e >= 0  for e in tri1_stu) else cand_tri2
+
+
+        interp_z =  stu[0] * tri.point_s[0][2] + stu[1] * tri.point_s[1][2] + stu[2] * tri.point_s[2][2];      
+        
+        return interp_z
 
 if __name__ == "__main__":
 
@@ -2231,7 +2458,7 @@ if __name__ == "__main__":
     tex_buffer_array = np.zeros((tex_patch_num_verts, tex_patch_num_verts, 3), dtype=np.float32)
     tex_index_array = []
 
-
+            
     with rasterio.open(texture_path) as tex_src:
 
         tex_band = tex_src.read(1)
@@ -2255,12 +2482,6 @@ if __name__ == "__main__":
 
         tex_xs = np.asarray(tex_xs)
         tex_ys = np.asarray(tex_ys)
-
-
-        #extent = [tex_src.bounds.left, tex_src.bounds.right, tex_src.bounds.bottom, tex_src.bounds.top]
-        #x_min, x_max, y_min, y_max = extent  
-        #x_max = xs[-1];
-        #y_min = ys[-1];
 
 
         for r in range(tex_patch_num_verts):
@@ -2445,7 +2666,9 @@ if __name__ == "__main__":
         road_test_points = [[ (543270.0+1, 4943470.0-5)
                              , (543270.0, 4943470.0)
                              , (543270.0, 4943474.0)
-                             , (543274.0, 4943479.0)]]
+                             , (543274.0, 4943479.0) ]]
+
+        road_test_points = [ [(p[0], p[1], mesh.interp_elev(p)) for p in road_test_points[0]] ]
 
         road_test_index = [[0, 3]]
 
@@ -2462,11 +2685,11 @@ if __name__ == "__main__":
 
         '''
 
-        x , y = zip( *ccw_quad_points )
+        x , y , z = zip( *ccw_quad_points )
 
         plt.plot(x, y, 'o', zorder=20)
 
-        x,y = zip( *ccw_quad_points + [ccw_quad_points[0]] )
+        x,y,z = zip( *ccw_quad_points + [ccw_quad_points[0]] )
 
         plt.plot(x, y, zorder=19, color="green")
 
@@ -2493,7 +2716,7 @@ if __name__ == "__main__":
         all_clip_edges = defaultdict( lambda: defaultdict(mesh.make_both_edge_dict) )
 
         # now a "poly" is a single clipping entity
-        for poly_id, poly in enumerate( [ ccw_quad_points ]):
+        for poly_id, poly in enumerate( [ ccw_quad_points ] ):
 
             poly_num_edges = len(poly)
 
@@ -2534,6 +2757,8 @@ if __name__ == "__main__":
 
         outside_clip_polys = []
 
+        tri_dict = defaultdict(list)
+        test_dict = defaultdict(int)
         for tri_edge_i, intersections in all_tri_edges.items():
 
             candidate_tris = mesh.get_tris_edge_index( tri_edge_i )
@@ -2543,11 +2768,17 @@ if __name__ == "__main__":
             #
             # every unique edges has 1 or 2 triangles
             # the CCW order of which is different
+            #
+
             for c_tri_indx in candidate_tris:
 
                 #if c_tri_indx == 20:
                 #    continue
-                    
+
+                test_dict[c_tri_indx]+=1
+
+                per_tri_clip = [] 
+
                 # indices of edges in CCW order
                 tri_edge_list = mesh.get_edge_indices(c_tri_indx)
 
@@ -2565,7 +2796,7 @@ if __name__ == "__main__":
 
                     print(tri_edge_inters)
 
-                    for inter_index in range( len(tri_edge_inters["intersections"] ) ):
+                    for inter_index in range( len( tri_edge_inters["intersections"] ) ):
 
                         print(f"# tri edge intersections: {len(tri_edge_inters["intersections"])}")
 
@@ -2581,7 +2812,19 @@ if __name__ == "__main__":
                         if poss_poly is None:
                             pass
                         else:
+                            per_tri_clip.append(poss_poly)
                             outside_clip_polys.append(poss_poly)
+
+
+                tri_dict[c_tri_indx].extend(per_tri_clip)
+
+
+        #
+        #
+        # OBJ creation
+        #
+        scale = 0.0008
+        mesh.create_face_obj(scale, "clipped_road_8-12-26", tri_dict)
 
 
         ed = defaultdict(int)
@@ -2633,14 +2876,17 @@ if __name__ == "__main__":
 
         colors = ['pink', 'orange', 'green', 'blue']
 
+        
         for _i,poly in enumerate(outside_clip_polys):
             
-            tup_poly = [tuple(point) for point in poly]   
+            tup_poly = [tuple(point["point"][:2]) for point in poly]   
             poly = Polygon(tup_poly, facecolor=colors[_i%4], edgecolor='black', linewidth=2, zorder=8)  
             ax.add_patch(poly)  
             # break     
-
-
-
         plt.show()
+        
+
+
+
+        
 
