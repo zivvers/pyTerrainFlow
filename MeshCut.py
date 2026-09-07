@@ -780,7 +780,7 @@ class MeshCut:
     #
     # returns bool for whether point is on segment
     # and t for how far along
-    def point_on_segment(self, p: glm.vec2, p0: glm.vec2, p1: glm.vec2, eps=1e-9):
+    def point_on_segment(self, p: glm.vec2, p0: glm.vec2, p1: glm.vec2, eps=1e-7):
 
         p = glm.vec2(p)
         p0 = glm.vec2(p0)
@@ -790,7 +790,7 @@ class MeshCut:
         rel = p - p0
 
         # Must lie on the infinite line
-        if abs(self.cross_2D(seg, rel)) > eps:
+        if abs(self.cross_2D(seg, rel)) > 0:
             return False, 0.0
 
         # Parameter along p0 -> p1
@@ -800,53 +800,33 @@ class MeshCut:
 
         u = glm.dot(rel, seg) / seg_len_sq
 
+        print(f"INTERSECTION / EDGE u : {u}")
         # Must also lie within the segment
         return -eps <= u <= 1.0 + eps , u
+        #return 0.0 <= u <= 1.0 , u
 
 
     #
     # for an intersection of a Graticule 
     #
     def get_mesh_edge_inter(self,
-                                graticule_type: Graticule, 
+                                graticule: Graticule, 
                                 inters : tuple[float, float] ):
+        inter_pix_x_dec = (inters[0] - self.transform.c ) / self.transform.a
+        inter_pix_y_dec = (inters[1] - self.transform.f ) / self.transform.e 
 
-        inter_pix_x = math.floor( (inters[0] - self.transform.c ) / self.transform.a );
-        inter_pix_y = math.floor( (inters[1] - self.transform.f ) / self.transform.e );
+        inter_pix_x = math.floor( inter_pix_x_dec );
+        inter_pix_y = math.floor( inter_pix_y_dec );
 
+        edge_index = self.get_grat_for_pixel(graticule\
+                                             , (inter_pix_x, inter_pix_y)
+                                             , (inter_pix_x_dec, inter_pix_y_dec))
+        
         print(f"floored pixel: {(inter_pix_x, inter_pix_y)}")
 
         print(f"post border containment: {(inter_pix_x, inter_pix_y)}")
 
-        match graticule_type:
-            case Graticule.LON:
-                
-                if (inter_pix_y >= self.num_rows):
-                    raise ValueError(f"off grid pixel: {(inter_pix_x, inter_pix_y)}")
-
-                # this will happen for border intersection!
-                elif (inter_pix_y == self.num_rows-1):
-                    inter_pix_y = inter_pix_y-1
-
-                edge_index = self.lon_edge_index(inter_pix_x, inter_pix_y)
-            case Graticule.LAT:
-
-                if (inter_pix_x >= self.num_cols):
-                    raise ValueError(f"off grid pixel: {(inter_pix_x, inter_pix_y)}")
-
-                # this will happen for border intersection!
-                elif (inter_pix_x == self.num_cols-1):
-                    inter_pix_x = inter_pix_x-1
-
-                edge_index = self.lat_edge_index(inter_pix_x, inter_pix_y)
-
-            case Graticule.DIAG:
-                
-                if (inter_pix_x == self.num_cols-1) or (inter_pix_y == self.num_rows-1):
-                    inter_pix_x = inter_pix_x-1
-                    inter_pix_y= inter_pix_y-1
-
-                edge_index = self.diag_edge_index(inter_pix_x, inter_pix_y)
+        
 
         #
         # check for degenerate case!
@@ -874,6 +854,273 @@ class MeshCut:
             return edge_index
 
     #
+    # keeping around for test purposes!
+    #
+    def get_intersection_degenerate(self, 
+                            graticule: Graticule
+                            , p0 : tuple[float, float, float] , p1 :tuple[float, float, float] 
+                            , e0 : tuple[float, float, float] , e1 : tuple[float, float, float]
+                            , poly_id
+                            , poly_num_points):
+
+        eps = 1e-9
+
+        # for now
+        #e0_z = e0[2]
+        #e1_z = e1[2]
+
+        p0_glm = glm.vec2(p0)
+        p1_glm = glm.vec2(p1)
+        e0_glm = glm.vec2(e0)
+        e1_glm = glm.vec2(e1)
+
+        mesh_dir = e1_glm - e0_glm;
+        clip_dir = p1_glm - p0_glm;
+
+        denominator = self.cross_2D(clip_dir, mesh_dir)
+        print(f"clip graticule determinant: {denominator}")
+
+        rel_dir = e0_glm - p0_glm
+
+        #
+        # 
+        # u is parameter for how along mesh edge we are but notice
+        # we're slicing entire GRATICULES with this method so we 
+        # need to find intersection first
+
+        degenerate = False
+
+        #
+        # paralell!
+        if abs(denominator) <= eps:
+
+            if abs(self.cross_2D(mesh_dir, rel_dir)) > eps: # never touch paralell
+                return None
+            else:
+                #
+                # on same line (inf intersections)
+                # but we only consider the clip point p0!
+                # notice due to 32 bit glm vec we need to change
+                # this back to a tuple instead of using original p0
+                intersection = tuple( p0_glm )   
+
+                edge_index, degenerate = self.get_mesh_edge_inter_degenerate(
+                                graticule, 
+                                intersection )
+
+                print(f"intersection: {tuple(intersection)}, grat: {graticule} results in edge: {edge_index}")
+                print(f"meshy edge: {e0} , {e1}")
+                edge_tup = self.tri_edge_index[edge_index]
+
+                edge0_index, edge1_index = edge_tup
+
+                edge0_vert = self.get_point( edge0_index )
+                edge1_vert = self.get_point( edge1_index )
+
+                edge0_glm = glm.vec2(edge0_vert)
+                edge1_glm = glm.vec2(edge1_vert)
+
+                sub_dir = edge1_glm - edge0_glm
+                denom = glm.dot(sub_dir, sub_dir)
+
+                edge_t = glm.dot(p0_glm - edge0_glm, sub_dir) / denom
+                clip_t = 0.0
+        else:
+
+            clip_t = self.cross_2D(rel_dir, mesh_dir) / denominator
+            mesh_t = self.cross_2D(rel_dir, clip_dir) / denominator
+
+            #
+            # notice no epsilon for upper bound!
+            clip_edge_hit = 0 <= clip_t <= 1.0
+
+            graticule_hit = -eps <= mesh_t <= 1.0 + eps
+
+            print(f"intersection clip hit: {clip_t} \n graticule hit: { mesh_t }")
+
+
+            if clip_edge_hit and graticule_hit:
+                intersection = tuple(p0_glm + clip_t * clip_dir)
+
+                edge_index, degenerate = self.get_mesh_edge_inter_degenerate(
+                                    graticule, 
+                                    intersection )
+
+                print(f"intersection: {tuple(intersection)}, grat: {graticule} results in edge: {edge_index}")
+                print(f"meshy edge: {e0} , {e1}")
+                edge_tup = self.tri_edge_index[edge_index]
+
+                edge0_index, edge1_index = edge_tup
+
+                edge0_vert = self.get_point( edge0_index )
+                edge1_vert = self.get_point( edge1_index )
+
+                edge0_glm = glm.vec2(edge0_vert)
+                edge1_glm = glm.vec2(edge1_vert)
+
+                sub_dir = edge1_glm - edge0_glm
+                denom = glm.dot(sub_dir, sub_dir)
+
+                edge_t = glm.dot(intersection - edge0_glm, sub_dir) / denom
+
+            else:
+                return None
+
+        new_eps = np.spacing( np.float32(intersection[0]) )
+
+        orig_intersection = intersection
+
+        if edge_t <= new_eps:
+            mesh_vertex_index = edge0_index
+            intersection = edge0_vert[:2]
+            mesh_feature = FeatureType.VERTEX
+        elif edge_t >= 1.0 - new_eps:
+            mesh_vertex_index = edge1_index
+            intersection = edge1_vert[:2]
+            mesh_feature = FeatureType.VERTEX
+        else:
+            mesh_vertex_index = None
+            mesh_feature = FeatureType.EDGE
+
+        if clip_t <= new_eps:
+            clip_feature = FeatureType.VERTEX
+        elif clip_t >= 1.0 - new_eps:
+            clip_feature = FeatureType.VERTEX
+            poly_id = (poly_id[0], (poly_id[1]+1)%poly_num_points)
+        else:
+            clip_feature = FeatureType.EDGE            
+
+        return Intersection( point=intersection,
+                                orig_point=orig_intersection,
+                                mesh_feature=mesh_feature,
+                                clip_feature=clip_feature,
+                                mesh_edge_index=edge_index,
+                                mesh_vertex_index=mesh_vertex_index,
+                                graticule=graticule,
+                                mesh_t=edge_t,
+                                clip_t=clip_t, 
+                                clip_poly_id=poly_id,
+                                degenerate=degenerate )
+
+    #
+    # Don't feed me no-existent edge params
+    #
+    def get_grat_for_pixel(self, graticule: Graticule
+                           , inter_pix: tuple[int,int]
+                           , inter_dec: tuple[float,float]):
+
+        inter_pix_x, inter_pix_y= inter_pix
+
+        print(f"intersection DECIMAL {inter_dec}")
+
+        match graticule.grat_type:
+            case GraticuleType.LON:
+                
+                if (inter_pix_y >= self.num_rows):
+                    raise ValueError(f"off grid pixel: {(inter_pix_x, inter_pix_y)}")
+
+                # this will happen for border intersection!
+                elif (inter_pix_y == self.num_rows-1):
+                    inter_pix_y = inter_pix_y-1
+
+                edge_index = self.lon_edge_index(inter_pix_x, inter_pix_y)
+            case GraticuleType.LAT:
+
+                if (inter_pix_x >= self.num_cols):
+                    raise ValueError(f"off grid pixel: {(inter_pix_x, inter_pix_y)}")
+
+                # this will happen for border intersection!
+                elif (inter_pix_x == self.num_cols-1):
+                    inter_pix_x = inter_pix_x-1
+
+                edge_index = self.lat_edge_index(inter_pix_x, inter_pix_y)
+
+            case GraticuleType.DIAG:
+                
+                #if (inter_pix_x == self.num_cols-1): 
+                #    inter_pix_x = inter_pix_x-1
+                #if (inter_pix_y == self.num_rows-1):
+                #    inter_pix_y= inter_pix_y-1
+
+                print(f"[0] % 1 = {inter_dec[0] % 1.0}, [1] % 1 = {inter_dec[1] % 1.0}")
+
+                adj_pix_x=inter_pix_x
+                adj_pix_y=inter_pix_y
+                if inter_dec[1] % 1.0 == 0 and inter_pix_y > 0:
+                    adj_pix_y-=1
+                    print(f"degenerate y Diagonal Intersec!")
+
+                if inter_dec[0] % 1.0 == 0 and inter_pix_x > 0:
+                    adj_pix_x-=1
+                    print(f"degenerate Y Diagonal Intersec!")
+
+                if adj_pix_x - adj_pix_y == graticule.id:
+                    edge_index = self.diag_edge_index(adj_pix_x, adj_pix_y )
+
+                    print(f"CHOSEN (adjusted) Diagonal: {adj_pix_x, adj_pix_y}")
+                elif inter_pix_x - inter_pix_y == graticule.id:
+                    edge_index = self.diag_edge_index(inter_pix_x, inter_pix_y)
+                    print(f"CHOSEN (original) Diagonal: {inter_pix_x, inter_pix_y}")
+                else:
+                    raise ValueError("don't have right Diagonal!")
+
+                # edge = self.get_edge_points(edge_index)
+                print(f"adjusted pixel: {inter_pix_x, inter_pix_y}")
+
+        return edge_index
+ 
+
+    #
+    # keeping around for test purposes!
+    # #
+    
+    def get_mesh_edge_inter_degenerate(self, graticule: Graticule, 
+                                        inters : tuple[float, float] ):
+
+        inter_pix_x_dec = (inters[0] - self.transform.c ) / self.transform.a
+        inter_pix_y_dec = (inters[1] - self.transform.f ) / self.transform.e
+
+        inter_pix_x = math.floor( inter_pix_x_dec );
+        inter_pix_y = math.floor( inter_pix_y_dec );
+
+        print(f"intersection: {inters}")
+
+        print(f"orig pix: {inter_pix_x,inter_pix_y}, floored pixel: {(inter_pix_x, inter_pix_y)}")
+
+        print(f"post border containment: {(inter_pix_x, inter_pix_y)}")
+
+        edge_index = self.get_grat_for_pixel( graticule\
+                                             , (inter_pix_x, inter_pix_y) 
+                                             , (inter_pix_x_dec, inter_pix_y_dec) )
+
+
+        edge = self.get_edge_points(edge_index)
+        on_edge, _ = self.point_on_segment(inters, edge[0], edge[1])
+
+        return edge_index, not on_edge
+
+
+        if not on_edge:
+            print(f"Degenerate edge intersection !!")
+            vert_index = inter_pix_x + inter_pix_y*self.num_cols
+            othr_edges = self.get_edges_vert( vert_index )
+
+            match graticule_type:
+                case GraticuleType.DIAG:
+                    pass ;
+
+                case GraticuleType.LON:
+                    pass;
+                case GraticuleType.LAT:
+                    pass;
+
+            #return None
+            return edge_index
+        else:
+            return edge_index
+
+
+    #
     # returns [] for no intersection and 
     # [ Intersection:
     #       mesh_feature: Edge or Vertex
@@ -884,7 +1131,7 @@ class MeshCut:
     #
     # this all assumes that e0 != e1 
     def get_intersection(self, 
-                            graticule_type: Graticule
+                            graticule: Graticule
                             , p0 : tuple[float, float, float] , p1 :tuple[float, float, float] 
                              , e0 : tuple[float, float, float] , e1 : tuple[float, float, float]
                              , poly_id
@@ -929,10 +1176,11 @@ class MeshCut:
                 intersection = tuple( p0_glm )   
 
                 edge_index = self.get_mesh_edge_inter(
-                                graticule_type, 
+                                graticule, 
                                 intersection )
 
-                print(f"intersection: {tuple(intersection)}, grat: {graticule_type} results in edge: {edge_index}")
+                
+                print(f"intersection: {tuple(intersection)}, grat: {graticule} results in edge: {edge_index}")
                 print(f"meshy edge: {e0} , {e1}")
                 edge_tup = self.tri_edge_index[edge_index]
 
@@ -967,25 +1215,29 @@ class MeshCut:
                 intersection = tuple(p0_glm + clip_t * clip_dir)
 
                 edge_index = self.get_mesh_edge_inter(
-                                    graticule_type, 
+                                    graticule, 
                                     intersection )
 
-                print(f"intersection: {tuple(intersection)}, grat: {graticule_type} results in edge: {edge_index}")
-                print(f"meshy edge: {e0} , {e1}")
-                edge_tup = self.tri_edge_index[edge_index]
+                if edge_index is not None:
+                    print(f"intersection: {tuple(intersection)}, grat: {graticule} results in edge: {edge_index}")
+                    print(f"meshy edge: {e0} , {e1}")
+                    edge_tup = self.tri_edge_index[edge_index]
 
-                edge0_index, edge1_index = edge_tup
+                    edge0_index, edge1_index = edge_tup
 
-                edge0_vert = self.get_point( edge0_index )
-                edge1_vert = self.get_point( edge1_index )
+                    edge0_vert = self.get_point( edge0_index )
+                    edge1_vert = self.get_point( edge1_index )
 
-                edge0_glm = glm.vec2(edge0_vert)
-                edge1_glm = glm.vec2(edge1_vert)
+                    edge0_glm = glm.vec2(edge0_vert)
+                    edge1_glm = glm.vec2(edge1_vert)
 
-                sub_dir = edge1_glm - edge0_glm
-                denom = glm.dot(sub_dir, sub_dir)
+                    sub_dir = edge1_glm - edge0_glm
+                    denom = glm.dot(sub_dir, sub_dir)
 
-                edge_t = glm.dot(intersection - edge0_glm, sub_dir) / denom
+                    edge_t = glm.dot(intersection - edge0_glm, sub_dir) / denom
+
+                else:
+                    edge_t = 2.95
 
             else:
                 return None
@@ -1015,7 +1267,7 @@ class MeshCut:
                                 clip_feature=clip_feature,
                                 mesh_edge_index=edge_index,
                                 mesh_vertex_index=mesh_vertex_index,
-                                graticule_type=graticule_type,
+                                graticule=graticule,
                                 mesh_t=edge_t,
                                 clip_t=clip_t, 
                                 clip_poly_id=poly_id )
@@ -1060,6 +1312,128 @@ class MeshCut:
             raise ValueError("Can't get common vertex two edges")
 
         return next(iter(shared))
+
+    def clip_mesh_edges_degenerate(self, clip_e0, clip_e1, polygon_id, num_clip_points):
+
+        inters_list = []
+
+        _p0 = clip_e0
+        _p1 = clip_e1    
+
+        e0_x_pix = (clip_e0[0] - self.transform.c ) / self.transform.a;
+        e1_x_pix = (clip_e1[0] - self.transform.c ) / self.transform.a;
+
+        e0_y_pix = (clip_e0[1] - self.transform.f ) / self.transform.e;
+        e1_y_pix = (clip_e1[1] - self.transform.f ) / self.transform.e;
+
+        max_x_pix = max( e0_x_pix, e1_x_pix )
+        min_x_pix = min( e0_x_pix, e1_x_pix )
+
+        max_y_pix = max( e0_y_pix, e1_y_pix )
+        min_y_pix = min( e0_y_pix, e1_y_pix )
+
+        min_inner_x = math.floor( min_x_pix );
+        min_inner_y = math.floor( min_y_pix );
+        
+        max_inner_x = math.ceil( max_x_pix );
+        max_inner_y = math.ceil( max_y_pix );
+
+    
+        x = np.arange(min_inner_x, max_inner_x + 1)
+        y = np.arange(min_inner_y, max_inner_y + 1)
+
+        # 
+        # vertical (lon) lines
+        for x_indx in x:
+
+            pix1 = ( int(x_indx) ,  0 );
+            pix2 = ( int(x_indx) , self.num_rows-1 );
+        
+            _e0 = self.convert_to_point(*pix1);
+            _e1 = self.convert_to_point(*pix2);
+
+
+            graticule = Graticule(GraticuleType.LON, pix1, pix2)
+            print(f"checking {GraticuleType.LON.name} {pix1} to {pix2}")
+            #
+            # here we use _e0, _e1
+            _inter = self.get_intersection_degenerate(graticule, _p0, _p1\
+                                           , _e0, _e1
+                                           , polygon_id, num_clip_points)
+
+            #_inter.clip_poly_id = polygon_id
+            if _inter is not None:
+                _inter.grat_pix0 = pix1
+                _inter.grat_pix1 = pix2
+                inters_list.append( _inter )
+            
+        # 
+        # horizontal (lat) lines
+        for y_indx in y:
+
+            pix1 = ( 0 ,  int( y_indx ) );
+            pix2 = ( self.num_cols-1 , int(y_indx) );
+        
+            _e0 = self.convert_to_point(*pix1);
+            _e1 = self.convert_to_point(*pix2);
+
+            print(f"checking {GraticuleType.LAT.name} {pix1} to {pix2}")
+            graticule = Graticule(GraticuleType.LAT, pix1, pix2)
+            _inter = self.get_intersection_degenerate( graticule, _p0, _p1\
+                                            , _e0, _e1
+                                            , polygon_id, num_clip_points )
+
+            #_inter.clip_poly_id = polygon_id
+
+            if _inter is not None:
+                _inter.grat_pix0 = pix1
+                _inter.grat_pix1 = pix2
+                inters_list.append( _inter )
+
+        min_d = min_inner_x - max_inner_y
+        max_d = max_inner_x - min_inner_y
+
+        #max_x = self.num_rows - 1
+        #max_y = self.num_cols - 1
+        
+        # SWiTCH
+        max_x = self.num_cols - 1
+        max_y = self.num_rows - 1
+
+        d_start = max(min_d, self.min_diag)
+        d_end = min(max_d, self.max_diag)
+
+        for d in range(d_start, d_end+1):
+    
+            x1 = max(0, d)
+            x2 = min(max_x, d + max_y)
+
+            if x1 == x2:
+                continue
+
+            print(f"x1: {x1}, x2: {x2}")
+
+            y1 = x1 - d
+            y2 = x2 - d
+
+            print(f"diag pixels: {(x1,y1)}, {(x2,y2)}")
+
+            _e0 = self.convert_to_point(x1, y1);
+            _e1 = self.convert_to_point(x2, y2);
+
+            print(f"checking {GraticuleType.DIAG.name} {x1, y1} to {x2, y2}")
+            graticule = Graticule( GraticuleType.DIAG , (int(x1),int(y1)) , (int(x2),int(y2)) )
+            _inter = self.get_intersection_degenerate(graticule, _p0, _p1\
+                                           , _e0, _e1
+                                           , polygon_id, num_clip_points )
+
+            if _inter is not None:
+                _inter.grat_pix0 = (int(x1),int(y1))
+                _inter.grat_pix1 = (int(x2),int(y2))
+                inters_list.append( _inter )
+
+        return inters_list
+
 
 
     # method that returns a list of intersections defined as
@@ -1113,9 +1487,11 @@ class MeshCut:
             _e0 = self.convert_to_point(*pix1);
             _e1 = self.convert_to_point(*pix2);
 
+            # CIIV
             #
+            graticule = Graticule(GraticuleType.LON, pix1, pix2)
             # here we use _e0, _e1
-            _inter = self.get_intersection(Graticule.LON, _p0, _p1\
+            _inter = self.get_intersection(graticule, _p0, _p1\
                                            , _e0, _e1
                                            , polygon_id, num_clip_points)
 
@@ -1134,8 +1510,8 @@ class MeshCut:
         
             _e0 = self.convert_to_point(*pix1);
             _e1 = self.convert_to_point(*pix2);
-        
-            _inter = self.get_intersection( Graticule.LAT, _p0, _p1\
+            graticule = Graticule(GraticuleType.LAT, pix1, pix2)
+            _inter = self.get_intersection( graticule, _p0, _p1\
                                             , _e0, _e1
                                             , polygon_id, num_clip_points )
 
@@ -1178,7 +1554,8 @@ class MeshCut:
             _e0 = self.convert_to_point(x1, y1);
             _e1 = self.convert_to_point(x2, y2);
 
-            _inter = self.get_intersection(Graticule.DIAG, _p0, _p1\
+            graticule = Graticule( GraticuleType.DIAG , (x1, y1), (x2, y2) )
+            _inter = self.get_intersection(graticule, _p0, _p1\
                                            , _e0, _e1
                                            , polygon_id, num_clip_points )
 
@@ -1263,17 +1640,17 @@ class MeshCut:
             edges = [
                 None , # 0
                 None , # 1
-                ( self.lon_edge_index(c, r), Graticule.LON, True) ,  # 2
-                ( self.lat_edge_index(c-1, r), Graticule.LAT, False) , # 3
+                ( self.lon_edge_index(c, r), GraticuleType.LON, True) ,  # 2
+                ( self.lat_edge_index(c-1, r), GraticuleType.LAT, False) , # 3
                 None ,
                 None
             ]
 
         elif topLeft:
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT, True) ,  # 0
-                (self.diag_edge_index(c, r), Graticule.DIAG, True) , # 1
-                (self.lon_edge_index(c, r), Graticule.LON, True),   # 2
+                (self.lat_edge_index(c, r), GraticuleType.LAT, True) ,  # 0
+                (self.diag_edge_index(c, r), GraticuleType.DIAG, True) , # 1
+                (self.lon_edge_index(c, r), GraticuleType.LON, True),   # 2
                 None ,
                 None ,
                 None          
@@ -1283,70 +1660,70 @@ class MeshCut:
                 None ,                                                  # 0
                 None ,                                                  # 1
                 None ,                                                  # 2
-                (self.lat_edge_index(c-1, r), Graticule.LAT, False ) ,  # 3
-                (self.diag_edge_index(c-1, r-1), Graticule.DIAG, False),# 4
-                (self.lon_edge_index(c, r-1), Graticule.LON, False )    #5
+                (self.lat_edge_index(c-1, r), GraticuleType.LAT, False ) ,  # 3
+                (self.diag_edge_index(c-1, r-1), GraticuleType.DIAG, False),# 4
+                (self.lon_edge_index(c, r-1), GraticuleType.LON, False )    #5
             ]
 
         elif bottomLeft:
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT, True) ,  # 0
+                (self.lat_edge_index(c, r), GraticuleType.LAT, True) ,  # 0
                 None ,
                 None ,
                 None ,
                 None ,
-                (self.lon_edge_index(c, r-1), Graticule.LON, False) # 5
+                (self.lon_edge_index(c, r-1), GraticuleType.LON, False) # 5
             ]
 
         elif c == self.num_cols - 1: #right column   
             edges = [
                 None ,
                 None ,
-                (self.lat_edge_index(c-1, r), Graticule.LAT, False) ,    # 2
-                (self.lon_edge_index(c, r-1), Graticule.LON , False) ,   # 3
-                (self.diag_edge_index(c-1, r-1), Graticule.DIAG, False), # 4
-                (self.lon_edge_index(c, r), Graticule.LON, True )        # 5
+                (self.lat_edge_index(c-1, r), GraticuleType.LAT, False) ,    # 2
+                (self.lon_edge_index(c, r-1), GraticuleType.LON , False) ,   # 3
+                (self.diag_edge_index(c-1, r-1), GraticuleType.DIAG, False), # 4
+                (self.lon_edge_index(c, r), GraticuleType.LON, True )        # 5
             ] 
 
         elif (c == 0): #left column
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT, True)  ,   # 0
-                (self.diag_edge_index(c, r), Graticule.DIAG, True),   # 1
-                (self.lon_edge_index(c, r), Graticule.LON, True)  ,   # 2
+                (self.lat_edge_index(c, r), GraticuleType.LAT, True)  ,   # 0
+                (self.diag_edge_index(c, r), GraticuleType.DIAG, True),   # 1
+                (self.lon_edge_index(c, r), GraticuleType.LON, True)  ,   # 2
                 None ,                                                # 3
                 None ,                                                # 4
-                (self.lon_edge_index(c, r-1), Graticule.LON, False)   # 5  
+                (self.lon_edge_index(c, r-1), GraticuleType.LON, False)   # 5  
             ]    
 
         elif (r == 0): #top
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT, True),     # 0
-                (self.diag_edge_index(c, r), Graticule.DIAG, True),   # 1
-                (self.lon_edge_index(c, r), Graticule.LON, True),     # 2          
-                (self.lat_edge_index(c-1, r), Graticule.LAT, False),  # 3
+                (self.lat_edge_index(c, r), GraticuleType.LAT, True),     # 0
+                (self.diag_edge_index(c, r), GraticuleType.DIAG, True),   # 1
+                (self.lon_edge_index(c, r), GraticuleType.LON, True),     # 2          
+                (self.lat_edge_index(c-1, r), GraticuleType.LAT, False),  # 3
                 None ,
                 None
             ]
         elif (r == self.num_rows - 1): # bottom
 
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT, True),       # 0 
+                (self.lat_edge_index(c, r), GraticuleType.LAT, True),       # 0 
                 None ,
                 None ,         
-                (self.lat_edge_index(c-1, r), Graticule.LAT, False),    # 3
-                (self.diag_edge_index(c-1, r-1), Graticule.DIAG, False),# 4
-                (self.lon_edge_index(c, r-1), Graticule.LON, False)     # 5  
+                (self.lat_edge_index(c-1, r), GraticuleType.LAT, False),    # 3
+                (self.diag_edge_index(c-1, r-1), GraticuleType.DIAG, False),# 4
+                (self.lon_edge_index(c, r-1), GraticuleType.LON, False)     # 5  
             ]
 
         else: # interior
 
             edges = [
-                (self.lat_edge_index(c, r), Graticule.LAT , True),      # 0
-                (self.diag_edge_index(c, r), Graticule.DIAG, True),     # 1  
-                (self.lon_edge_index(c, r), Graticule.LON, True),       # 2       
-                (self.lat_edge_index(c-1, r), Graticule.LAT, False),    # 3
-                (self.diag_edge_index(c-1, r-1), Graticule.DIAG, False),# 4
-                (self.lon_edge_index(c, r-1), Graticule.LON, False)     # 5 
+                (self.lat_edge_index(c, r), GraticuleType.LAT , True),      # 0
+                (self.diag_edge_index(c, r), GraticuleType.DIAG, True),     # 1  
+                (self.lon_edge_index(c, r), GraticuleType.LON, True),       # 2       
+                (self.lat_edge_index(c-1, r), GraticuleType.LAT, False),    # 3
+                (self.diag_edge_index(c-1, r-1), GraticuleType.DIAG, False),# 4
+                (self.lon_edge_index(c, r-1), GraticuleType.LON, False)     # 5 
             ]
 
         return edges
@@ -2503,11 +2880,11 @@ class MeshCut:
             # | \ 2 1 |
             # |  \|  \|
             # *---*---*
-            case Graticule.LON:
+            case GraticuleType.LON:
                 edge_indx_rel_tri = [2,5]
-            case Graticule.LAT:
+            case GraticuleType.LAT:
                 edge_indx_rel_tri = [0,3]
-            case Graticule.DIAG:
+            case GraticuleType.DIAG:
                 edge_indx_rel_tri = [1,4]
 
         # lower to higher pixel
@@ -2601,11 +2978,11 @@ class MeshCut:
         #
         if ((_pixel_x == 0 and not direction) 
             or (_pixel_x == self.num_cols - 1 and direction)) and \
-            (grat_type == Graticule.LAT or grat_type == Graticule.DIAG):
+            (grat_type == GraticuleType.LAT or grat_type == GraticuleType.DIAG):
             return False
         if (( _pixel_y == 0 and not direction) or 
             ( _pixel_y == self.num_rows - 1 and direction)) and \
-                (grat_type == Graticule.LON or grat_type == Graticule.DIAG):
+                (grat_type == GraticuleType.LON or grat_type == GraticuleType.DIAG):
             return False
 
         print(f"getting edge for vert: {vert_index}, dir: {direction}")
@@ -2997,27 +3374,27 @@ class MeshCut:
     def is_vert_clipped( self, vert_index, clip_polys ):
 
         lat_up = self.follow_geodesic_clip( True 
-                , Graticule.LAT
+                , GraticuleType.LAT
                 , vert_index
                 , clip_polys )
         lat_down = self.follow_geodesic_clip( False 
-                , Graticule.LAT
+                , GraticuleType.LAT
                 , vert_index
                 , clip_polys )
         lon_up = self.follow_geodesic_clip( True 
-                , Graticule.LON
+                , GraticuleType.LON
                 , vert_index
                 , clip_polys )
         lon_down = self.follow_geodesic_clip( False 
-                , Graticule.LON
+                , GraticuleType.LON
                 , vert_index
                 , clip_polys )
         diag_up = self.follow_geodesic_clip( True 
-                , Graticule.DIAG
+                , GraticuleType.DIAG
                 , vert_index
                 , clip_polys )
         diag_down = self.follow_geodesic_clip( False 
-                , Graticule.DIAG
+                , GraticuleType.DIAG
                 , vert_index
                 , clip_polys )
         
@@ -3427,32 +3804,32 @@ if __name__ == "__main__":
         vert_index = 4
 
         in_clip_4_right = mesh.follow_geodesic_clip( True 
-                             , Graticule.LAT
+                             , GraticuleType.LAT
                              , vert_index
                              , [ ccw_quad_points ] )
 
         in_clip_4_left = mesh.follow_geodesic_clip( False 
-                        , Graticule.LAT
+                        , GraticuleType.LAT
                         , vert_index
                         , [ ccw_quad_points ] )
 
         in_clip_4_up = mesh.follow_geodesic_clip( True 
-                             , Graticule.LON
+                             , GraticuleType.LON
                              , vert_index
                              , [ ccw_quad_points ] )
 
         in_clip_4_down = mesh.follow_geodesic_clip( False 
-                        , Graticule.LON
+                        , GraticuleType.LON
                         , vert_index
                         , [ ccw_quad_points ] )
 
         in_clip_4_diag_down = mesh.follow_geodesic_clip( False 
-                                , Graticule.DIAG
+                                , GraticuleType.DIAG
                                 , vert_index
                                 , [ ccw_quad_points ] )
 
         in_clip_4_diag_up = mesh.follow_geodesic_clip( True 
-                                , Graticule.DIAG
+                                , GraticuleType.DIAG
                                 , vert_index
                                 , [ ccw_quad_points ] )
                         

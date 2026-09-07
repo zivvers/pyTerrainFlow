@@ -383,21 +383,32 @@ def format_inter(inter: Intersection) -> str:
 
     mesh_label = inter.mesh_edge_index if inter.mesh_feature == FeatureType.EDGE else inter.mesh_vertex_index
 
-    return rf'''Intersection {inter.letter} from {inter.graticule_type.name} b/w pixels {inter.grat_pix0}, {inter.grat_pix1}:
+    return rf'''Intersection {inter.letter} from {inter.graticule.grat_type.name} b/w pixels {inter.grat_pix0}, {inter.grat_pix1}:
       $M$ {{type: {inter.mesh_feature.name}, id: {mesh_label}, $t_m$: {inter.mesh_t : .2f}}}, $C$ {{type: {inter.clip_feature.name}, id: {inter.clip_poly_id[1]}, $t_c$: {inter.clip_t : .2f}}}'''
-    
+
+#
+# slightly different label to emphasize the edge
+#
+def format_inter_edge(inter: Intersection) -> str:
+
+    mesh_label = inter.mesh_edge_index if inter.mesh_feature == FeatureType.EDGE else inter.mesh_vertex_index
+
+    return rf'''Intersection {inter.letter}: {inter.orig_point} from {inter.graticule.grat_type.name} b/w pixels {inter.grat_pix0}, {inter.grat_pix1}:
+      $Mesh$ Edge: {inter.mesh_edge_index}'''
+
 
 '''
 Intersection(point=(543264.0, 4943493.0), mesh_feature=<FeatureType.EDGE: 2>, clip_feature=<FeatureType.VERTEX: 1>
     , mesh_edge_index=7, mesh_edge_order=None, mesh_vertex_index=None
-    , graticule_type=<Graticule.LON: 1>, clip_poly_id=None, clip_poly_order=None
+    , graticule_type=<GraticuleType.LON: 1>, clip_poly_id=None, clip_poly_order=None
     , mesh_t=0.5, clip_t=0.0), 
 '''
 
 #
 # the PNTs have to be 2D
 #
-def plot_points(triang , mesh, pnts, inters, clip_points , plot_path, edge_limiter=None, tri_bool=True, extent=None):
+def plot_points(title, triang , mesh, pnts, inters, clip_points , plot_path\
+                , edge_limiter=None, tri_bool=True, extent=None, edge_plot=False):
 
 
     #p = plt_triang_clip(triang, mesh, clip_points+[clip_points[0]] )
@@ -408,9 +419,14 @@ def plot_points(triang , mesh, pnts, inters, clip_points , plot_path, edge_limit
         1,
         height_ratios=[3, 1],
         hspace=0.08,
+        wspace= 0.35
     )
 
     ax = fig.add_subplot(gs[0])
+
+    if title is not None:
+        ax.set_title( title )
+
     ax_text = fig.add_subplot(gs[1])
     ax.triplot(
         triang,
@@ -429,27 +445,34 @@ def plot_points(triang , mesh, pnts, inters, clip_points , plot_path, edge_limit
     #     ax.text(e_avg.x, e_avg.y, f"{edge_i}",\
     #                 fontsize=11, style="italic", zorder=20)
 
-    all_clip_points = clip_points+[clip_points[0]]
-    clip_xs,clip_ys = zip(*all_clip_points)
+    if clip_points is not None:
+        all_clip_points = clip_points+[clip_points[0]]
+        clip_xs,clip_ys = zip(*all_clip_points)
 
-    ax.plot(
-        clip_xs,
-        clip_ys,
-        color="0.15",
-        linewidth=1.5,
-        linestyle="--",
-        zorder=2,
-        label="Clip Poly",
-    )
+        ax.plot(
+            clip_xs,
+            clip_ys,
+            color="0.15",
+            linewidth=1.5,
+            linestyle="--",
+            zorder=2,
+            label="Clip Poly",
+        )
 
     #
     # clip points
     x,y = zip( *pnts )
     ax.plot(x, y, zorder=10, color="green")
 
-    frmt_inters = [format_inter(_inter) for _inter in inters]
+    if edge_plot:
+        frmt_inters = [format_inter_edge(_inter) for _inter in inters]
+    else:
+        frmt_inters = [format_inter(_inter) for _inter in inters]
 
-    inter_points = [ _inter.point for _inter in inters ]
+    #
+    # notice using original point!
+    inter_points = [ _inter.orig_point if _inter.orig_point is not None else _inter.point\
+                    for _inter in inters ]
 
     inter_x,inter_y = zip( *inter_points )
 
@@ -620,16 +643,37 @@ def plot_points(triang , mesh, pnts, inters, clip_points , plot_path, edge_limit
     )
 
     ax_text.axis("off")
-    ax_text.text(
-        0.02,
-        0.95,
-        '\n'.join(frmt_inters),
-        transform=ax_text.transAxes,
-        ha="left",
-        va="top",
-        fontsize=12,
-        family="sans-serif",
-    )
+
+    y = 0.92
+
+    label_texts = []
+    for i, line in enumerate(frmt_inters):
+        ax_text.text(
+            0.02,
+            y,
+            line,
+            transform=ax_text.transAxes,
+            ha="left",
+            va="top",
+            fontsize=12,
+            family="sans-serif",
+            color="red" if inters[i].degenerate and edge_plot else "black",
+        )
+        y-=0.225
+
+    # adjust_text(
+    #     label_texts,
+    #     ax=ax_text,
+    #     avoid_self=True,
+    #     ensure_inside_axes=True,
+    #     only_move={
+    #         "text": "y",
+    #         "static": "y",
+    #         "explode": "y",
+    #         "pull": "y",
+    #     },
+    #     iter_lim=200,
+    # )
     
     #p.subplots_adjust(bottom=bottom_perc)
 
@@ -982,7 +1026,7 @@ class TestMeshCut(unittest.TestCase):
     #
     def test_get_edges_vert( self ):
 
-        req_grats = [Graticule.LAT, Graticule.DIAG, Graticule.LON, Graticule.LAT, Graticule.DIAG, Graticule.LON]
+        req_grats = [GraticuleType.LAT, GraticuleType.DIAG, GraticuleType.LON, GraticuleType.LAT, GraticuleType.DIAG, GraticuleType.LON]
 
         i = 4
         edges = self.mesh.get_edges_vert(i)
@@ -1099,7 +1143,9 @@ class TestMeshCut(unittest.TestCase):
         _e0 = self.mesh.convert_to_point(*pix1);
         _e1 = self.mesh.convert_to_point(*pix2);
             # starting on the mesh edge
-        glancing_inter1 = self.mesh.get_intersection(Graticule.LON, self.diamond_clip[0], self.diamond_clip[1] \
+        
+        graticule = Graticule(GraticuleType.LON, pix1, pix2)
+        glancing_inter1 = self.mesh.get_intersection(graticule, self.diamond_clip[0], self.diamond_clip[1] \
                                                         , _e0, _e1
                                                         , (0,1), 4)
 
@@ -1119,7 +1165,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"diamond_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points(f"Diamond $C$ Edge {i}"
+                    ,self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1139,7 +1186,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"diamond_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Diamond $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1159,7 +1207,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path = self.cfg.output_dir / f"diamond_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Diamond $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1180,7 +1229,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path = self.cfg.output_dir / f"diamond_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Diamond $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1204,7 +1254,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"square_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Square $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1224,7 +1275,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"square_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Square $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1245,7 +1297,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"square_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Square $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1267,7 +1320,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"square_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Square $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1292,7 +1346,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"bigger_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Rectangle $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1315,7 +1370,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"bigger_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Rectangle $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1340,7 +1396,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"bigger_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Rectangle $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1366,7 +1423,8 @@ class TestMeshCut(unittest.TestCase):
 
         file_path =  self.cfg.output_dir / f"bigger_clip{i}.png"
         
-        plot_points( self.triang 
+        plot_points( f"Rectangle $C$ Edge {i}"
+                    , self.triang 
                     , self.mesh
                     , clip_edge
                     , clip_edge_inters
@@ -1384,7 +1442,7 @@ class TestMeshCut(unittest.TestCase):
         self.mesh.perform_clipping( self.bigger_rect2 )
 
         in_clip_4_right = self.mesh.follow_geodesic_clip( True 
-                        , Graticule.LAT
+                        , GraticuleType.LAT
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1406,7 +1464,7 @@ class TestMeshCut(unittest.TestCase):
 
         # LAT left
         in_clip_4_left = self.mesh.follow_geodesic_clip( False 
-                        , Graticule.LAT
+                        , GraticuleType.LAT
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1422,7 +1480,7 @@ class TestMeshCut(unittest.TestCase):
 
         # LON up
         in_clip_4_up = self.mesh.follow_geodesic_clip( False 
-                        , Graticule.LON
+                        , GraticuleType.LON
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1438,7 +1496,7 @@ class TestMeshCut(unittest.TestCase):
 
         # LON down
         in_clip_4_down = self.mesh.follow_geodesic_clip( True 
-                        , Graticule.LON
+                        , GraticuleType.LON
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1454,7 +1512,7 @@ class TestMeshCut(unittest.TestCase):
 
         # DIAG up
         in_clip_4_diag_up = self.mesh.follow_geodesic_clip( False 
-                        , Graticule.DIAG
+                        , GraticuleType.DIAG
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1470,7 +1528,7 @@ class TestMeshCut(unittest.TestCase):
 
         # DIAG down
         in_clip_4_diag_down = self.mesh.follow_geodesic_clip( False 
-                        , Graticule.DIAG
+                        , GraticuleType.DIAG
                         , vert_index
                         , self.bigger_rect2 )
 
@@ -1616,9 +1674,9 @@ class TestMeshCut(unittest.TestCase):
         poly_edge_inters = self.eps_mesh.clip_mesh_edges( clip_p0, clip_p1, (0,1), 4 )
 
         #
-        # 
-        self.assertEqual( poly_edge_inters[1].mesh_feature, FeatureType.EDGE )
-        self.assertEqual( poly_edge_inters[0].mesh_feature, FeatureType.EDGE )
+        # Due to vertex epsilon thing we should now get a vertex
+        self.assertEqual( poly_edge_inters[1].mesh_feature, FeatureType.VERTEX )
+        self.assertEqual( poly_edge_inters[0].mesh_feature, FeatureType.VERTEX )
 
 
         '''
@@ -1730,10 +1788,13 @@ class TestMeshCut(unittest.TestCase):
                          self.eps_mesh.buffer_array[1,1,1] + window ]
 
         file_path =  self.cfg.output_dir / f"micro_diff_degenerecy_new.png"
-
+        titl = rf"$ \epsilon = {np.spacing( np.float32(start[0])) }$ Diff from (1,0) LON"
+        
+        titl = rf"$ \epsilon = {np.spacing( np.float32(start[0])) }$ Diff from (1,0) LON"
         
         plt.close()
-        plot_points( self.triang 
+        plot_points( titl
+                    , self.triang 
                     , self.mesh
                     , [clip_p0[:2], clip_p1[:2]]
                     , poly_edge_inters
@@ -1749,8 +1810,11 @@ class TestMeshCut(unittest.TestCase):
 
         pre_adj_clip_p0 = self.mesh.interpolate_xy_coords((1, 0.5))[:2]
         pre_adj_clip_p1 = self.mesh.interpolate_xy_coords((1, 1.5))[:2]
-        e0 = self.mesh.get_point(0,0)[:2]
-        e1 = self.mesh.get_point(1,1)[:2]
+
+        pix0 = (0,0)
+        pix1 = (2,2)
+        e0 = self.mesh.get_point(*pix0)[:2]
+        e1 = self.mesh.get_point(*pix1)[:2]
 
         clip_p0 = ((pre_adj_clip_p0[0] - np.spacing( np.float32(start[0]) )).item() \
                     , pre_adj_clip_p0[1])
@@ -1763,25 +1827,43 @@ class TestMeshCut(unittest.TestCase):
         p0_glm = glm.vec2(clip_p0)
         p1_glm = glm.vec2(clip_p1)
 
-        mesh_dir = e1_glm - e0_glm;
-        clip_dir = p1_glm - p0_glm;
-        rel_dir = e0_glm - p0_glm
+        mesh_dir = e1_glm - e0_glm ;
+        clip_dir = p1_glm - p0_glm ;
+        rel_dir = e0_glm - p0_glm  ;
 
         diag_denominator = self.mesh.cross_2D(clip_dir, mesh_dir)
         diag_clip_t = self.mesh.cross_2D(rel_dir, mesh_dir) / diag_denominator
         diag_intersection = tuple(p0_glm + diag_clip_t * clip_dir)
 
-        edge_index = self.mesh.get_mesh_edge_inter(
-                                Graticule.DIAG, 
-                                 diag_intersection )
+        graticule = Graticule( GraticuleType.DIAG, pix0, pix1 )
+
+        edge_index = self.mesh.get_mesh_edge_inter( graticule , diag_intersection )
 
         #
-        # notice this result is "wrong" because this degenerate intersection
+        # Testing OLD degenerate form
+        edge_index_degen, degen_bool = self.mesh.get_mesh_edge_inter_degenerate(
+                                        graticule, 
+                                         diag_intersection )
+
+        #
+        # notice this result WAS "wrong" because this degenerate intersection
         # falls on the latitude line it gets routed to (1,0)
         #
-        self.assertEqual(edge_index, 14) # 12 is first diag, 14 is second
+        # 09/05/26: updated logic to hopefully give us correct cell's
+        #           correct graticule
+        self.assertEqual(edge_index_degen, 12) 
+        self.assertTrue(degen_bool)
+
+        # self.mesh.get_intersection_degenerate(self, 
+        #                     graticule_type: Graticule
+        #                     , p0 : tuple[float, float, float] , p1 :tuple[float, float, float] 
+        #                     , e0 : tuple[float, float, float] , e1 : tuple[float, float, float]
+        #                     , poly_id
+        #                     , poly_num_points)
 
 
+        # Now we get lat edge 2
+        self.assertEqual(edge_index, 2) # 12 is first diag, 14 is second
 
 
     def test_degeneracy_resolution(self):
@@ -1809,9 +1891,15 @@ class TestMeshCut(unittest.TestCase):
 
         poly_edge_inters = self.eps_mesh.clip_mesh_edges( clip_p0, clip_p1, (0,1), 4 )
 
-        self.assertEqual(len(poly_edge_inters) , 1 )
+        # it's two now
+        self.assertEqual(len(poly_edge_inters) , 2 )
 
         self.assertEqual(poly_edge_inters[0].mesh_feature, FeatureType.VERTEX)
+
+
+        poly_edge_inters = self.eps_mesh.clip_mesh_edges_degenerate(clip_p0, clip_p1, (0,1), 4 )
+
+        self.assertTrue( any([_it.degenerate for _it in poly_edge_inters]) )
 
         # plot_points_anim( self.triang 
         #             , self.mesh
@@ -1824,6 +1912,288 @@ class TestMeshCut(unittest.TestCase):
         #             , micro_extent ) 
 
 
+    #
+    # although the degenerecies associated with diagonal edges usually result in
+    # a VERTEX intersection due to the use of epsilon vertex intersections
+    # we want to be able to know that we're getting the edge that's on the
+    # graticule we originally chose
+    def test_get_right_edge_degenerecy(self):  
+
+        start = self.mesh.interpolate_xy_coords((1, 1))
+        x_spacing = np.spacing( np.float32(start[0]) ).item()
+        y_spacing = np.spacing( np.float32(start[1]) ).item()
+
+        window = 1
+
+        #
+        #
+        # y diff along (0,0) LAT [TOP]
+        #
+        pre_adj_clip_p0 = self.mesh.get_point(0, 0)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 0)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] , pre_adj_clip_p0[1] - y_spacing )
+        clip_p1 = (pre_adj_clip_p1[0] , pre_adj_clip_p1[1] - y_spacing )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+
+        edges = [item["index"] for item in self.mesh.get_edge_indices(0)]\
+              + [item["index"] for item in self.mesh.get_edge_indices(1)]
+
+        for _inter in inters_list:
+            self.assertIn(_inter.mesh_edge_index , edges)
+
+        add_letter(inters_list)
+
+        micro_extent = [ self.mesh.buffer_array[0,0,0] - 0.25 ,\
+                    self.mesh.buffer_array[0,0,0] + window ,\
+                    self.mesh.buffer_array[0,0,1] - y_spacing*2, \
+                    self.mesh.buffer_array[0,0,1] + y_spacing ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_top.png"
+
+        titl = rf"$ \epsilon = {y_spacing}$ Diff from (0,0) LAT"
+
+        plt.close()
+        plot_points( titl,
+                    self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
+
+        #
+        # USE X-DIFF FOR ^ Y
+        #
+        # (0,0) LAT [TAWP]
+        # 
+        pre_adj_clip_p0 = self.mesh.get_point(0, 0)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 0)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] , pre_adj_clip_p0[1] - x_spacing )
+        clip_p1 = (pre_adj_clip_p1[0] , pre_adj_clip_p1[1] - x_spacing )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+
+        edges = [item["index"] for item in self.mesh.get_edge_indices(0)]\
+              + [item["index"] for item in self.mesh.get_edge_indices(1)]
+
+        #for _inter in inters_list:
+        #    self.assertIn(_inter.mesh_edge_index , edges)
+
+        add_letter(inters_list)
+
+        micro_extent = [ self.mesh.buffer_array[0,0,0] - 0.25 ,\
+                    self.mesh.buffer_array[0,0,0] + window ,\
+                    self.mesh.buffer_array[0,0,1] - y_spacing*2, \
+                    self.mesh.buffer_array[0,0,1] + y_spacing ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_top_smll_eps.png"
+
+        titl = rf"$ \epsilon = {x_spacing}$ Diff from (0,0) LAT"
+        
+
+        plt.close()
+        plot_points( titl,
+                    self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
+
+
+        #
+        #
+        # Y diff along (0,1) LAT [BOTTOM]
+        # 
+        pre_adj_clip_p0 = self.mesh.get_point(0, 1)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 1)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] , pre_adj_clip_p0[1] + y_spacing )
+        clip_p1 = (pre_adj_clip_p1[0] , pre_adj_clip_p1[1] + y_spacing )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+        add_letter(inters_list)
+        #for _inter in inters_list:
+        #    self.assertIn(_inter.mesh_edge_index , edges)
+
+        micro_extent = [ self.eps_mesh.buffer_array[1,1,0] - window  ,\
+            self.eps_mesh.buffer_array[1,1,0] + 0.25,\
+            self.eps_mesh.buffer_array[1,1,1] - y_spacing, \
+            self.eps_mesh.buffer_array[1,1,1] + y_spacing*2 ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_bottom.png"
+
+        titl = rf"$ \epsilon = {y_spacing}$ Diff from (0,1) LAT"
+        plt.close()
+        plot_points( titl
+                    , self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
+
+        #
+        # USE X-DIFF FOR ^ Y
+        #
+        # (0,1) LAT [BOTTOM]
+        # 
+        pre_adj_clip_p0 = self.mesh.get_point(0, 1)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 1)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] , pre_adj_clip_p0[1] + x_spacing )
+        clip_p1 = (pre_adj_clip_p1[0] , pre_adj_clip_p1[1] + x_spacing )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+        add_letter(inters_list)
+        #for _inter in inters_list:
+        #    self.assertIn(_inter.mesh_edge_index , edges)
+
+        micro_extent = [ self.eps_mesh.buffer_array[1,1,0] - window,\
+            self.eps_mesh.buffer_array[1,1,0] + 0.25 ,\
+            self.eps_mesh.buffer_array[1,1,1] - y_spacing , \
+            self.eps_mesh.buffer_array[1,1,1] + y_spacing*2 ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_bottom_smll_eps.png"
+
+        titl = rf"$ \epsilon = {x_spacing}$ Diff from (0,1) LAT"
+        plt.close()
+        plot_points( titl
+                    , self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None # [ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
+
+
+        #
+        #
+        # X diff in first CELL FarRight [ (1,0) LON ]
+        #
+        pre_adj_clip_p0 = self.mesh.get_point(1, 0)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 1)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] - x_spacing , pre_adj_clip_p0[1] )
+        clip_p1 = (pre_adj_clip_p1[0] - x_spacing , pre_adj_clip_p1[1] )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+        add_letter(inters_list)
+
+        micro_extent = [ self.eps_mesh.buffer_array[1,1,0] - window ,\
+            self.eps_mesh.buffer_array[1,1,0] + 0.25,\
+            self.eps_mesh.buffer_array[1,1,1] - y_spacing, \
+            self.eps_mesh.buffer_array[1,1,1] + y_spacing*2 ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_right.png"
+
+        titl = rf"$ \epsilon = {x_spacing}$ Diff from (1,0) LON"
+        plt.close()
+        plot_points( titl
+                    , self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
+
+
+        #
+        #
+        # X diff in first CELL farLeft [ (0,0) LON ]
+        #
+        #
+        pre_adj_clip_p0 = self.mesh.get_point(0, 0)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(0, 1)[:2]
+        clip_p0 = (pre_adj_clip_p0[0] + x_spacing , pre_adj_clip_p0[1] )
+        clip_p1 = (pre_adj_clip_p1[0] + x_spacing , pre_adj_clip_p1[1] )
+
+
+        micro_extent = [ self.mesh.buffer_array[0,0,0] - 0.25 ,\
+            self.mesh.buffer_array[0,0,0] + window ,\
+            self.mesh.buffer_array[0,0,1] - y_spacing*2, \
+            self.mesh.buffer_array[0,0,1] + y_spacing ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_left.png"
+
+        titl = rf"$ \epsilon = {x_spacing}$ Diff from (0,0) LON"
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+        
+        add_letter( inters_list )
+
+        plt.close()
+        plot_points( titl,
+                    self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent
+                    , True )
+
+
+        #
+        #
+        # RANDOM DIAGONAL INTERSECTION
+        #
+        pre_adj_clip_p0 = self.mesh.get_point(1, 0)[:2]
+        pre_adj_clip_p1 = self.mesh.get_point(1, 1)[:2]
+
+        clip_p0 = (pre_adj_clip_p0[0] - 2 - x_spacing , pre_adj_clip_p0[1] )
+        clip_p1 = (pre_adj_clip_p1[0] - 2 - x_spacing , pre_adj_clip_p1[1] )
+
+        inters_list = self.mesh.clip_mesh_edges_degenerate(clip_p0 , clip_p1, (0,1), 4)
+        add_letter(inters_list)
+
+        le_inter=inters_list[-1].orig_point
+
+        micro_extent = [ pre_adj_clip_p0[0] - 2 - 4*x_spacing ,\
+            pre_adj_clip_p0[0] - 2 + 3*x_spacing,\
+            le_inter[1] - 1, \
+            le_inter[1] + 1 ]
+
+        file_path =  self.cfg.output_dir / f"diagonal_degenerecy_middle.png"
+
+        titl = rf"$ Expressing "
+        plt.close()
+        plot_points( None
+                    , self.triang 
+                    , self.mesh
+                    , [clip_p0[:2], clip_p1[:2]]
+                    , inters_list
+                    , None#[ v[:2] for v in shft_verts ]
+                    , file_path 
+                    , [0, 6, 12]
+                    , False
+                    , micro_extent 
+                    , True )
 
 
 
